@@ -1,0 +1,3 @@
+- check if windoes are correct by plotting
+- feat enginering max and mins per window
+- Normalziationm by the maximun of the dataset
