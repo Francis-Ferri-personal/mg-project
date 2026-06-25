@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class OcularStatefulLSTM(nn.Module):
     """
     Stateful LSTM model for Ocular Signal Classification.
     Instead of treating windows independently, it propagates the hidden and cell states
-    chronologically across consecutive 256-point windows belonging to the same patient.
+    chronologically across consecutive feature windows belonging to the same patient.
     """
-    def __init__(self, input_size=1, hidden_size=64, num_layers=2, num_classes=2, dropout=0.5):
+    def __init__(self, input_size=24, hidden_size=64, num_layers=2, num_classes=2, dropout=0.5):
         super(OcularStatefulLSTM, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -20,42 +21,21 @@ class OcularStatefulLSTM(nn.Module):
         self.fc = nn.Linear(hidden_size, num_classes)
     
     def forward(self, x, mask=None):
-        # x shape: (batch_size, n_reps, seq_len, features) -> e.g., (batch_size, n_windows, 256, 1)
-        batch_size, n_reps, seq_len, features = x.shape
+        # x shape: (batch_size, n_reps, features) -> e.g., (batch_size, n_windows, 24)
+        batch_size, n_reps, features = x.shape
         device = x.device
-        
-        # 1. Initialize hidden (h) and cell (c) states to zero at the beginning of the sequence
-        # Shape: (num_layers, batch_size, hidden_size)
-        h = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)
-        c = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)
-        
-        # Tensor to accumulate and hold the final valid state for each patient in the batch
-        last_valid_states = torch.zeros(batch_size, self.hidden_size).to(device)
-        
-        # 2. Iterate chronologically through each consecutive window (t)
-        for t in range(n_reps):
-            # Extract window 't' for all patients in the batch
-            # Shape: (batch_size, seq_len, features) -> (batch_size, 256, 1)
-            window_t = x[:, t, :, :]
-            
-            # Pass the current window and the previous step's accumulated states into the LSTM
-            # lstm_out shape: (batch_size, seq_len, hidden_size)
-            lstm_out, (h, c) = self.lstm(window_t, (h, c))
-            
-            # Extract the features from the very last timestep of this window (index -1)
-            current_state = lstm_out[:, -1, :] # Shape: (batch_size, hidden_size)
-            
-            # 3. Dynamic Masking / Padding Handling:
-            # If a patient's recording has already ended (mask == 0 for this window), 
-            # freeze their state at the last valid window to prevent corruption from padding zeros.
-            if mask is not None:
-                # mask[:, t] indicates if window 't' is real (1) or padded remainder (0)
-                m = mask[:, t].unsqueeze(-1) # Shape: (batch_size, 1)
-                last_valid_states = m * current_state + (1 - m) * last_valid_states
-            else:
-                last_valid_states = current_state
 
-        # 4. Final classification based strictly on the accumulated terminal state of the full signal
-        output = self.dropout(last_valid_states)
-        logits = self.fc(output)
+        if mask is not None:
+            seq_lengths = mask.sum(dim=1).long()
+        else:
+            seq_lengths = torch.full((batch_size,), n_reps, dtype=torch.long, device=device)
+
+        packed = pack_padded_sequence(x, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
+        packed_out, (h, c) = self.lstm(packed)
+        output, _ = pad_packed_sequence(packed_out, batch_first=True, total_length=n_reps)
+
+        last_idx = (seq_lengths - 1).unsqueeze(1).unsqueeze(2).expand(-1, 1, self.hidden_size)
+        last_valid_output = output.gather(1, last_idx).squeeze(1)
+
+        logits = self.fc(self.dropout(last_valid_output))
         return logits

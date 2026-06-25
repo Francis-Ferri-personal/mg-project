@@ -3,24 +3,47 @@ import torch
 from torch.utils.data import Dataset
 
 
-
 class AccessionDataset(Dataset):
     """
-    Dataset for Myasthenia Gravis (MG) binary classification.
-    Maps 'Healthy control' to class 0, and any MG variant ('Probable/Definite MG') to class 1.
+    Dataset for Myasthenia Gravis (MG) binary classification using extracted features.
+
+    Each visit is represented by a feature sequence over time.
+    Each window is split into two halves, and for each half we extract:
+      - maximum value
+      - minimum value
+      - position index of the maximum
+      - position index of the minimum
+
+    That yields 8 features per frequency window, so using all three frequencies
+    produces 24 features per time step.
     """
+    DEFAULT_FREQUENCIES = ['freq_0.5', 'freq_0.75', 'freq_1.0']
+    FREQUENCY_WINDOW_SIZES = {
+        'freq_0.5': 480,
+        'freq_0.75': 360,
+        'freq_1.0': 240,
+    }
+
     def __init__(self, file_paths, window_size=240, frequency_key='freq_1.0', feature_key="speed_horizontalAVG"):
         self.file_paths = file_paths
         self.window_size = window_size
-        self.frequency_key = frequency_key
         self.feature_key = feature_key
-        # Binary classification mapping
+
+        if frequency_key == 'all':
+            self.frequency_keys = self.DEFAULT_FREQUENCIES.copy()
+        elif isinstance(frequency_key, (list, tuple)):
+            self.frequency_keys = list(frequency_key)
+        else:
+            self.frequency_keys = [frequency_key]
+
+        if not self.frequency_keys:
+            self.frequency_keys = self.DEFAULT_FREQUENCIES.copy()
+
         self.label_map = {
             'Healthy control': 0,
             'Definite MG': 1
         }
         self.samples = self._index_files()
-        print(self.samples)
 
     def _index_files(self):
         samples = []
@@ -30,24 +53,26 @@ class AccessionDataset(Dataset):
                 if label_text in path:
                     label = label_id
                     break
-            
+
             if label == -1:
                 continue
 
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
+
                 visits = data.get('visits', {})
                 for visit_id, visit_data in visits.items():
-                    for freq_id, freq_data in visit_data.items():
-                        if freq_id == self.frequency_key:
-                            samples.append({
-                                'path': path,
-                                'visit_id': visit_id,
-                                'freq_id': freq_id,
-                                'label': label
-                            })
+                    if not isinstance(visit_data, dict):
+                        continue
+
+                    available_freqs = [freq for freq in self.frequency_keys if freq in visit_data]
+                    if available_freqs:
+                        samples.append({
+                            'path': path,
+                            'visit_id': visit_id,
+                            'label': label
+                        })
             except Exception as e:
                 print(f"Error indexing file {path}: {e}")
         return samples
@@ -55,14 +80,48 @@ class AccessionDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+    def _extract_window_features(self, series, window_size):
+        if len(series) >= window_size:
+            window = list(series[:window_size])
+        else:
+            window = list(series) + [0.0] * (window_size - len(series))
+
+        half = len(window) // 2
+        first_half = window[:half]
+        second_half = window[half:]
+
+        features = []
+        for offset, segment in [(0, first_half), (half, second_half)]:
+            if len(segment) == 0:
+                features.extend([0.0, 0.0, 0.0, 0.0])
+                continue
+
+            max_val = float(max(segment))
+            min_val = float(min(segment))
+            max_idx = segment.index(max(segment)) + offset
+            min_idx = segment.index(min(segment)) + offset
+
+            features.extend([max_val, min_val, float(max_idx), float(min_idx)])
+
+        return features
+
+    def _extract_sequence_features(self, series, window_size):
+        features = []
+        if not isinstance(series, (list, tuple)) or len(series) == 0:
+            return features
+
+        for start in range(0, len(series), window_size):
+            window = series[start:start + window_size]
+            features.append(self._extract_window_features(window, window_size))
+
+        return features
+
     def __getitem__(self, idx):
         sample_info = self.samples[idx]
         path = sample_info['path']
         visit_id = sample_info['visit_id']
-        freq_id = sample_info['freq_id']
         label = sample_info['label']
 
-        # Flexible encoding fallback strategy during loading
         data = None
         for enc in ['utf-16-le', 'utf-16', 'utf-8']:
             try:
@@ -72,63 +131,68 @@ class AccessionDataset(Dataset):
             except Exception:
                 continue
 
+        num_features = len(self.frequency_keys) * 8
         if data is None:
-            return torch.zeros((1, 256, 1)), torch.tensor(label)
+            return torch.zeros((1, num_features), dtype=torch.float32), torch.tensor(label)
 
         try:
-            session_data = data['visits'][visit_id][freq_id]
-            feature_key = self.feature_key
-            if feature_key not in session_data:
-                # Raise error
-                raise ValueError(f"Feature key '{feature_key}' not found in session data")
-            whole_cycle = session_data[feature_key]
-            
-            # Convert the raw array to a PyTorch tensor
-            full_signal = torch.tensor(whole_cycle, dtype=torch.float32) # Shape: (total_points,)
-            
-            window_size = self.window_size
-            total_points = full_signal.size(0)
-            
-            # Calculate how many full windows we can extract
-            n_reps = total_points // window_size
-            
-            if n_reps == 0:
-                # Fallback if the signal is shorter than the window size
-                padding = torch.zeros(window_size - total_points)
-                padded_signal = torch.cat([full_signal, padding])
-                return padded_signal.view(1, window_size, 1), torch.tensor(label)
-            
-            # Truncate any leftover remainder points at the very end of the signal
-            valid_length = n_reps * window_size
-            full_signal = full_signal[:valid_length]
-            
-            # Chunk/Reshape the long array into (n_reps, window_size, 1)
-            # .view(n_reps, window_size) splits it into rows of window_size points
-            sequence = full_signal.view(n_reps, window_size, 1)
-            
-            return sequence, torch.tensor(label)
+            visit_data = data['visits'][visit_id]
+            freq_sequences = []
+            max_t = 0
+
+            for freq_id in self.frequency_keys:
+                freq_data = visit_data.get(freq_id)
+                series = None
+                if isinstance(freq_data, dict):
+                    series = freq_data.get(self.feature_key)
+
+                window_size = self.FREQUENCY_WINDOW_SIZES.get(freq_id, self.window_size)
+                seq_features = self._extract_sequence_features(series, window_size)
+                freq_sequences.append(seq_features)
+                max_t = max(max_t, len(seq_features))
+
+            sequence = []
+            for t in range(max_t):
+                step_features = []
+                for seq_features in freq_sequences:
+                    if t < len(seq_features):
+                        step_features.extend(seq_features[t])
+                    else:
+                        step_features.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                sequence.append(step_features)
+
+            if len(sequence) == 0:
+                sequence = [[0.0] * num_features]
+
+            feature_sequence = torch.tensor(sequence, dtype=torch.float32)
+            return feature_sequence, torch.tensor(label)
 
         except Exception as e:
-            print(f"Error windowing sample from {path}: {e}")
-            return torch.zeros((1, 256, 1)), torch.tensor(label)
+            print(f"Error processing sample from {path}: {e}")
+            return torch.zeros((1, num_features), dtype=torch.float32), torch.tensor(label)
 
 
-def ocular_collate_fn(batch, window_size=240):
+def ocular_collate_fn(batch):
     """
-    Custom collate function to pack items with a variable number of repetitions (n_reps) 
+    Custom collate function to pack items with a variable number of repetitions (n_reps)
     into a uniformly padded tensor batch.
+
+    Each sample is expected to be shaped (n_reps, features), where
+    the feature vector length is 24 when all three frequencies are used.
     """
     sequences, labels = zip(*batch)
     max_n = max([s.size(0) for s in sequences])
-    
+    n_features = sequences[0].size(1)
+
     padded_sequences = []
     masks = []
     for s in sequences:
         n = s.size(0)
-        padding = torch.zeros((max_n - n, window_size, 1), dtype=s.dtype)
-        padded_s = torch.cat([s, padding], dim=0)
-        padded_sequences.append(padded_s)
-        
+        if n < max_n:
+            padding = torch.zeros((max_n - n, n_features), dtype=s.dtype)
+            s = torch.cat([s, padding], dim=0)
+        padded_sequences.append(s)
+
         mask = torch.cat([torch.ones(n), torch.zeros(max_n - n)])
         masks.append(mask)
 
