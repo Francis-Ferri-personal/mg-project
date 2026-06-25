@@ -169,7 +169,8 @@ class Accession:
     def draw(self,
              attributes_to_draw:list=[], 
              region:tuple[float|int]=None,
-             tick_dist:float=1.0):
+             tick_dist:float=1.0,
+             use_standard:bool=False):
         """_summary_
 
         Available Attributes:
@@ -285,26 +286,61 @@ class Accession:
             print('DO ANALYSIS FIRST!')
             return
         
-        self.standard_cycles = [(start,end) for start,end in self.cycles
+        valid_cycles = [(start,end) for start,end in self.cycles
                            if (end - start - 1) >= self.standard_cycle_length]
         
-        for kine_attr in self.KINEMATIC_ATTRIBUTES:
-            kine_info = getattr(self,f'{kine_attr}_dict')
+        self.standard_cycles = [(start,start+self.standard_cycle_length+1)
+                                for start in range(0,
+                                                   len(valid_cycles)*self.standard_cycle_length + 1, 
+                                                   self.standard_cycle_length+1)]
 
-            if kine_info is None:
-                continue
+        standard_dict = {}
+        self.standard_analysis = {}
 
-            kine_dict = {}
-            for attr_k, attr_v in kine_info.items():
-                standard_recording = []
-                for start, end in self.standard_cycles:
-                    cycle = attr_v[start:end]
-                    if len(cycle) == self.standard_cycle_length:
-                        standard_recording += cycle
-                        continue
-                    standard_recording += transfer_indices(cycle,self.standard_cycle_length)
-                kine_dict[attr_k] = standard_recording
-            setattr(self, f'standard_{kine_attr}_dict',kine_dict)
+        for start, end in valid_cycles:
+            standard_dict['time_list'] = standard_dict.setdefault('time_list',[])\
+                                            + transfer_indices(self.time_list[start:end], self.standard_cycle_length)
+            standard_dict['target_list'] = standard_dict.setdefault('target_list',[])\
+                                            + transfer_indices(self.target_list[start:end], self.standard_cycle_length)
+            
+            for kine_attr in self.KINEMATIC_ATTRIBUTES + ('position',):
+                kine_name = f'{kine_attr}_dict'
+                kine_info = getattr(self,kine_name)
+
+                if kine_info is None:
+                    continue
+                
+                standard_dict[kine_name] = standard_dict.setdefault(kine_name,{})
+                data_kine:dict = standard_dict[kine_name]
+                
+                self.standard_analysis[kine_attr] = self.standard_analysis.setdefault(kine_attr,{})
+                analysis_kine:dict = self.standard_analysis[kine_attr]
+
+                for attr_k, attr_v in kine_info.items():
+                    cycle =  transfer_indices(attr_v[start:end], self.standard_cycle_length)
+                    # print(f'data_kine {data_kine}')
+                    data_kine[attr_k] = data_kine.setdefault(attr_k,[])\
+                                        + cycle
+                    
+                    analysis_mean = sum(cycle)/self.standard_cycle_length
+                    analysis_var = sum([(x-analysis_mean)**2 for x in cycle])/self.standard_cycle_length
+                    analysis_sorted = sorted(cycle)
+                    analysis_percentiles = {int(k): analysis_sorted[int(self.standard_cycle_length*(k/100))]
+                                            for k in (5,10,20,25,30,40,50,60,70,80,90,95)}
+                    analysis_median = analysis_percentiles[50]
+                    analysis = {
+                        'max':max(cycle),
+                        'min':min(cycle),
+                        'median':analysis_median,
+                        'percentiles':analysis_percentiles,
+                        'mean':analysis_mean,
+                        'variance':analysis_var,
+                        'std':analysis_var**0.5
+                    }
+                    analysis_kine[attr_k] = analysis_kine.setdefault(attr_k,[]) + [analysis]
+
+        for k, v in standard_dict.items():
+            setattr(self, f'standard_{k}', v)
 
         self.has_standard = True
         return self
@@ -359,12 +395,18 @@ class Accession:
             rep += 'run Accession.standardise_cycles to standardise recording\n' + big_divider
             return rep
         
-        rep += f'standard_cycles: {len(self.standard_cycles)}\n'
-        
+        rep += f'standard_cycles: {len(self.standard_cycles)}\n'\
+                + f"standard_position_dict: {[(k,len(v)) for k,v in self.standard_position_dict.items()]}\n"\
+                + f"standard_time_list: {(self.standard_time_list[0],self.standard_time_list[-1])}\n"\
+                + f"standard_target_list (number of samples): {len(self.standard_target_list)}\n"+small_divider
+
         for kinematic in self.KINEMATIC_ATTRIBUTES:
             kinematic_msg = getattr(self, f'standard_{kinematic}_dict', None)
             kinematic_msg = None if kinematic_msg is None else [(k,len(v)) for k,v in kinematic_msg.items()]
             rep += f'standard_{kinematic}_dict: {kinematic_msg}\n'
+
+        rep += small_divider\
+                + f'standard_analysis: \n\t{'\n\t'.join([f'{k}: {list(v.keys())} ({len(v['AVG'])}) -> {list(v['AVG'][0].keys())}' for k,v in self.standard_analysis.items()])}\n'
                     
         rep += big_divider
         return rep

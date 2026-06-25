@@ -140,6 +140,9 @@ class AccessionDatabase:
 
         return stripped
     
+    def normalise_dataset(self):
+        return
+    
     def __repr__(self):
         big_divider = "+"*70+'\n'
         small_divider = "-"*70+'\n'
