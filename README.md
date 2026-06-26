@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Myasthenia Gravis Ocular Signal Classification
 
 This project processes ocular signal data from patients to classify visits as `Definite MG` or `Healthy control` using frequency-based windows and an LSTM model.
@@ -92,7 +91,3 @@ jupyter notebook 03-training.ipynb
 ## Notes
 
 This README documents the project structure and main components of the MG classification pipeline built on ocular signal features.
-=======
-# mg_experiment
-Myasthenia-Gravis diagnosis automation
->>>>>>> origin/main

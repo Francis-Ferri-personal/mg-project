@@ -1,9 +1,7 @@
-<<<<<<< HEAD
 __pycache__
 out
 .venv
 data
-=======
 **/.DS_Store
 */.DS_Store
 
@@ -13,4 +11,3 @@ __pycache__/
 exports/
 
 */test.ipynb
->>>>>>> origin/main
