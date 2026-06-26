@@ -1,10 +1,13 @@
 import matplotlib.pyplot as plt
 import os
+import gc
+
+import matplotlib
+matplotlib.use('Agg') # fix memory leak
 
 from pandas import read_csv
 
-from eva_experiments.utils import clamp, float_range, transfer_indices
-from eva_experiments.mg_analysis import kinematics
+from eva_experiments.utils import clamp, float_range, transfer_indices, lerp
 from eva_experiments.mg_stats.utils import rate_of_change, \
                                             rolling_average,\
                                             percentile_normalise,\
@@ -13,7 +16,7 @@ from eva_experiments.mg_stats.utils import rate_of_change, \
 CSV_ENCODING = 'utf-16-le'
 
 class Accession:
-    KINEMATIC_ATTRIBUTES = ('gain','speed','velocity','acceleration')
+    KINEMATIC_ATTRIBUTES = ('position','gain','speed','velocity','acceleration')
 
     def __init__(self, accession_path:str, accession_info:dict):
         """Class for singular Accession
@@ -40,6 +43,7 @@ class Accession:
             setattr(self, k, v)
 
         self.standard_cycle_length = [480,360,240][self.file_idx]
+        self.standard_cycle_duration = int(self.standard_cycle_length/120)
 
     DEFAULT_ANALYSIS_NORMAL = {
         'gain':{'rawness':'normal','value_smoothing':3,'source_smoothing':0},
@@ -53,6 +57,74 @@ class Accession:
         'speed':{'rawness':'raw','value_smoothing':3,'source_smoothing':0},
     }
 
+    def __find_jumps(target_list:list, direction:str='both', debug=-1) -> list[tuple[str,int]]:
+        """Finds jumps in targets
+
+        Args:
+            target_list (list): a list of target positions
+            direction (str, optional): 'positive', 'negative', or 'both. Defaults to 'both'.
+            debug (int, optional): Print out debug information. Defaults to -1.
+
+        Returns:
+            list: A list of tuples ([direction],[jump_index])
+        """
+        if direction is None:
+            direction = 'both'
+
+        jumps_ids = [i for i in range(1,len(target_list)-4) if abs(target_list[i])==15]
+        if debug>-1:
+            print(jumps_ids)
+
+        if direction == 'positive':
+            jumps_ids = [(direction,i) for i in jumps_ids if (target_list[i]-target_list[i-1]) >= 15] 
+        
+        elif direction == 'negative':
+            jumps_ids = [(direction,i) for i in jumps_ids if (target_list[i]-target_list[i-1]) <= -15]
+
+        elif direction == 'both':
+            jumps_ids = [(q>0 and 'positive' or 'negative',i) 
+                         for i in jumps_ids if abs(q:=(target_list[i]-target_list[i-1])) >= 15]
+        
+        else:
+            raise Exception("Direction has to be 'positive', 'negative', or 'both'")
+
+        out = []
+        if target_list[0]!=0:
+            jump_direction = target_list[0]>0 and 'positive' or 'negative'
+            if jump_direction != direction and direction!='both':
+                out = []
+            else:
+                out = [(jump_direction,0)]
+        
+        return out+jumps_ids
+    
+    def __find_gain(position_series:list, target_series:list, do_clamp=True) -> list:
+        """Finds the ratio of position from target, normalised in 0 to 1 scale
+
+        Args:
+            position_series (list): Position as a list
+            target_series (list): Targets as a list
+            do_clamp (bool): Clamps output to 0,1 range
+
+        Returns:
+            list: A list of gain
+        """
+        gain_series = []
+        
+        for p,t in zip(position_series, target_series):
+            if t == 0:
+                gain_series.append(0)
+                continue
+            gain_series.append(lerp(p/t,-1.0,1.0,0.0,1.0,do_clamp))
+
+        return gain_series
+    
+    def __find_energy_power(series:list,max_time:float):
+        energy = sum([x*x for x in series])
+        power = energy/max_time
+        return energy, power
+
+
     def _process_jumps(self):
         self.first_cycle_direction = self.jump_ids[0][0]
         cycles = [idx for direction,idx in self.jump_ids 
@@ -64,13 +136,17 @@ class Accession:
         self.position_dict = {}
         for aoi in self.axes_of_interest:
             if aoi == 'AVG':
-                self.position_dict[aoi] = pointwise_mean(list(self.position_dict.values()))
-                continue
-            self.position_dict[aoi[0]] = list(df[aoi])
+                a = pointwise_mean(list(self.position_dict.values()))
+                aoi = aoi
+            else:
+                a = list(df[aoi])
+                aoi = aoi[0]
+
+            self.position_dict[aoi] = a
         return
 
     def analyse(self,
-                analysis_attrs:dict[dict]=None
+                analysis_attrs:dict[dict]=None,
                 ):
         """Analyse accession for rendering and other usage
         default analyses position, time_list, and target_list
@@ -117,7 +193,7 @@ class Accession:
 
         self.time_list = list(df['Time(sec)'])
         self.target_list = list(df[f'Target{self.axis[0].upper()}'])
-        self.jump_ids = kinematics.find_jumps(self.target_list, 'both')
+        self.jump_ids = Accession.__find_jumps(self.target_list, 'both')
         self._process_jumps()
         self._process_position(df)
 
@@ -126,6 +202,9 @@ class Accession:
                            if kine_attr in self.KINEMATIC_ATTRIBUTES]
 
         for kine_attr in self.KINEMATIC_ATTRIBUTES:
+            if kine_attr == 'position':
+                continue 
+
             if kine_attr not in kinematic_attrs:
                 for a_attr in ('dict','source_smoothing','value_smoothing','is_normal'):
                     setattr(self,f'{kine_attr}_{a_attr}',getattr(self,f'{kine_attr}_{a_attr}',None))
@@ -146,7 +225,7 @@ class Accession:
                 
             if kine_attr == 'gain':
                 attr_clamp = attr_info.get('do_clamp',True)
-                attr_dict = {k:kinematics.find_gain(rolling_average(v,attr_source_smoothing), self.target_list, attr_clamp) 
+                attr_dict = {k:Accession.__find_gain(rolling_average(v,attr_source_smoothing), self.target_list, attr_clamp) 
                              for k,v in self.position_dict.items()}
                 
             if kine_attr == 'acceleration':
@@ -161,8 +240,28 @@ class Accession:
             for a_attr,k_attr in zip(('dict','source_smoothing','value_smoothing','is_normal'),
                                      (attr_dict,attr_source_smoothing,attr_value_smoothing,attr_rawness)):
                 setattr(self,f'{kine_attr}_{a_attr}',k_attr)
+        
+        self.energy_dict = {}
+        self.power_dict = {}
+        #   GET ENERGY AND POWER
+        for kine in self.KINEMATIC_ATTRIBUTES:
+            kine_info = getattr(self,f'{kine}_dict',None)
+            if kine_info is None:
+                continue
+
+            energy_dict = {}
+            power_dict = {}
+
+            for k,v in kine_info.items():
+                energy_dict[k], power_dict[k] = Accession.__find_energy_power(v, self.time_list[-1])
+
+            self.energy_dict[kine] = energy_dict
+            self.power_dict[kine] = power_dict
 
         self.has_analysis = True
+
+        del df
+        gc.collect()
 
         # saccade_idx = None
         # if id_saccades:
@@ -175,13 +274,13 @@ class Accession:
         #         # raise Exception()
         return self
 
-    DEFAULT_DRAWING_ATTRIBUTES = ('position',) + KINEMATIC_ATTRIBUTES
-
     def draw(self,
              attributes_to_draw:list=[], 
              region:tuple[float|int]=None,
-             tick_dist:float=1.0,
+             tick_dist:float=None,
              use_standard:bool=False,
+             figsize = None,
+             dpi = 72,
              save_name = '',
              save_dir = '',
              do_draw = True):
@@ -202,6 +301,10 @@ class Accession:
         Returns:
             _type_: _description_
         """
+        plt.ioff()
+
+        if tick_dist is None:
+            tick_dist = self.standard_cycle_duration
         
         if region is None:
             region = (None, None)
@@ -227,10 +330,13 @@ class Accession:
         if not attr_amt:
             print('NEED ATTRIBUTES TO DRAW!')
             return
+        
+        if figsize is None:
+            figsize = (24,attr_amt*6)
 
         fig, axs = plt.subplots(nrows = attr_amt,
-                                figsize=(24,attr_amt*6), 
-                                dpi=72, 
+                                figsize = figsize, 
+                                dpi=dpi, 
                                 sharex=True, 
                                 constrained_layout=True)
 
@@ -242,7 +348,7 @@ class Accession:
 
         figure_title = f'{self.accession[0]:02d}-{self.accession[1]:02d} | ' 
         figure_title += f'Axis: {self.axis} | Freq: {self.frequency} | '
-        figure_title += f'Time: {region[0]:02d} - {region[1]:02d} seconds'
+        figure_title += f'Time: {region[0]:03} - {region[1]:03} seconds'
         fig.suptitle(figure_title)
 
         # ax0_title = 'Target'
@@ -319,6 +425,10 @@ class Accession:
             plt.savefig(os.path.join(save_dir,f'{save_name}.jpg'),bbox_inches='tight')
         
         if not do_draw:
+            plt.close(fig)
+            plt.close('all')
+            del fig, axs
+            gc.collect()
             return
 
         plt.show()
@@ -389,7 +499,7 @@ class Accession:
             standard_dict['target_list'] = standard_dict.setdefault('target_list',[])\
                                             + transfer_indices(self.target_list[start:end], self.standard_cycle_length)
             
-            for kine_attr in self.KINEMATIC_ATTRIBUTES + ('position',):
+            for kine_attr in self.KINEMATIC_ATTRIBUTES:
                 kine_name = f'{kine_attr}_dict'
                 kine_info = getattr(self,kine_name)
 
@@ -414,6 +524,7 @@ class Accession:
                     analysis_percentiles = {int(k): analysis_sorted[int(self.standard_cycle_length*(k/100))]
                                             for k in (5,10,20,25,30,40,50,60,70,80,90,95)}
                     analysis_median = analysis_percentiles[50]
+                    analysis_energy, analysis_power = Accession.__find_energy_power(cycle, self.standard_cycle_duration)
                     analysis = {
                         'max':max(cycle),
                         'min':min(cycle),
@@ -421,7 +532,9 @@ class Accession:
                         'percentiles':analysis_percentiles,
                         'mean':analysis_mean,
                         'variance':analysis_var,
-                        'std':analysis_var**0.5
+                        'std':analysis_var**0.5,
+                        'energy':analysis_energy,
+                        'power':analysis_power
                     }
                     analysis_kine[attr_k] = analysis_kine.setdefault(attr_k,[]) + [analysis]
 
@@ -429,6 +542,24 @@ class Accession:
 
         for k, v in standard_dict.items():
             setattr(self, f'standard_{k}', v)
+
+        #   GET ENERGY AND POWER
+        self.standard_energy_dict = {}
+        self.standard_power_dict = {}
+        
+        for kine in self.KINEMATIC_ATTRIBUTES:
+            kine_info = getattr(self,f'standard_{kine}_dict',None)
+            if kine_info is None:
+                continue
+
+            energy_dict = {}
+            power_dict = {}
+
+            for k,v in kine_info.items():
+                energy_dict[k], power_dict[k] = Accession.__find_energy_power(v, self.standard_time_list[-1])
+
+            self.standard_energy_dict[kine] = energy_dict
+            self.standard_power_dict[kine] = power_dict
 
         self.has_standard = True
         return self
@@ -469,13 +600,20 @@ class Accession:
                 + f"cycles: {len(self.cycles)}\n"
         
         for kinematic in self.KINEMATIC_ATTRIBUTES:
+            if kinematic == 'position':
+                continue
             kinematic_msg = getattr(self, f'{kinematic}_dict')
             kinematic_msg = None if kinematic_msg is None else [(k,len(v)) for k,v in kinematic_msg.items()]
             rep += small_divider\
                     + f"{kinematic}_dict: {kinematic_msg}\n"\
                     + f"{kinematic}_is_normal: {getattr(self,f'{kinematic}_is_normal')}\n"\
                     + f"{kinematic}_value_smoothing: {getattr(self,f'{kinematic}_value_smoothing')}\n"\
-                    + f"{kinematic}_source_smoothing: {getattr(self,f'{kinematic}_source_smoothing')}\n"
+                    + f"{kinematic}_source_smoothing: {getattr(self,f'{kinematic}_source_smoothing')}\n"\
+                    
+        rep += small_divider\
+                + f"energy_dict: \n\t{'\n\t'.join([f'{k}:{list(v.items())}' for k,v in self.energy_dict.items()])}\n"\
+                + f"power_dict: \n\t{'\n\t'.join([f'{k}:{list(v.items())} (second^-1)' for k,v in self.power_dict.items()])}\n"\
+                
 
         has_standard = getattr(self,'has_standard',False)
         rep += big_divider + f'has_standard: {has_standard}\n'
@@ -491,10 +629,15 @@ class Accession:
         for kinematic in self.KINEMATIC_ATTRIBUTES:
             kinematic_msg = getattr(self, f'standard_{kinematic}_dict', None)
             kinematic_msg = None if kinematic_msg is None else [(k,len(v)) for k,v in kinematic_msg.items()]
-            rep += f'standard_{kinematic}_dict: {kinematic_msg}\n'
+            rep += f'standard_{kinematic}_dict: {kinematic_msg}\n'\
+            
+        rep += small_divider\
+                + f"standard_energy_dict: \n\t{'\n\t'.join([f'{k}:{list(v.items())}' for k,v in self.standard_energy_dict.items()])}\n"\
+                + f"standard_power_dict: \n\t{'\n\t'.join([f'{k}:{list(v.items())} (second^-1)' for k,v in self.standard_power_dict.items()])}\n"\
 
         rep += small_divider\
-                + f'standard_analysis: \n\t{'\n\t'.join([f'{k}: {list(v.keys())} ({len(v['AVG'])}) -> {list(v['AVG'][0].keys())}' for k,v in self.standard_analysis.items()])}\n'
+                + f'standard_analysis: \n\t{'\n\t'.join([f'{k}: {list(v.keys())} ({len(v['AVG'])}) -> {list(v['AVG'][0].keys())}' 
+                                                         for k,v in self.standard_analysis.items()])}\n'
                     
         rep += big_divider
         return rep
