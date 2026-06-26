@@ -56,6 +56,8 @@ def clamp(value:int|float, min_val:int|float, max_val:int|float) -> int|float:
     Returns:
         int | float
     """
+    if min_val > max_val:
+       min_val, max_val = max_val, min_val
     return min(max_val,max(min_val,value))
 
 def lerp(value:int|float, 

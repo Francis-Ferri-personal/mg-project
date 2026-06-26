@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import os
 
 from pandas import read_csv
 
@@ -12,7 +13,7 @@ from eva_experiments.mg_stats.utils import rate_of_change, \
 CSV_ENCODING = 'utf-16-le'
 
 class Accession:
-    KINEMATIC_ATTRIBUTES = ('gain','speed','velocity')
+    KINEMATIC_ATTRIBUTES = ('gain','speed','velocity','acceleration')
 
     def __init__(self, accession_path:str, accession_info:dict):
         """Class for singular Accession
@@ -65,7 +66,7 @@ class Accession:
             if aoi == 'AVG':
                 self.position_dict[aoi] = pointwise_mean(list(self.position_dict.values()))
                 continue
-            self.position_dict[aoi] = list(df[aoi])
+            self.position_dict[aoi[0]] = list(df[aoi])
         return
 
     def analyse(self,
@@ -78,6 +79,7 @@ class Accession:
         Analysis Attributes:
         - gain:
             - rawness: 'raw' OR 'normal', default 'normal'
+            - do_clamp: True OR False, default True
             - source_smoothing: int, default 0
             - value_smoothing: int,  default 3
 
@@ -89,6 +91,11 @@ class Accession:
         - speed
             - rawness: 'raw' OR 'normal', default 'normal'
             - source_smoothing: int, default 0
+            - value_smoothing: int,  default 3
+
+        - acceleration
+            - rawness: 'raw' OR 'normal', default 'normal'
+            - source_smoothing: int, default 0, smoothens velocity
             - value_smoothing: int,  default 3
 
         - saccades (NOT IMPLEMENTED)
@@ -138,8 +145,13 @@ class Accession:
                              for k,v in self.position_dict.items()}
                 
             if kine_attr == 'gain':
-                attr_dict = {k:kinematics.find_gain(rolling_average(v,attr_source_smoothing), self.target_list) 
+                attr_clamp = attr_info.get('do_clamp',True)
+                attr_dict = {k:kinematics.find_gain(rolling_average(v,attr_source_smoothing), self.target_list, attr_clamp) 
                              for k,v in self.position_dict.items()}
+                
+            if kine_attr == 'acceleration':
+                attr_dict = {k:rate_of_change(rolling_average(rate_of_change(v),attr_source_smoothing))
+                            for k,v in self.position_dict.items()}
             
             attr_dict = {k:rolling_average(v,attr_value_smoothing) for k,v in attr_dict.items()}
 
@@ -149,7 +161,6 @@ class Accession:
             for a_attr,k_attr in zip(('dict','source_smoothing','value_smoothing','is_normal'),
                                      (attr_dict,attr_source_smoothing,attr_value_smoothing,attr_rawness)):
                 setattr(self,f'{kine_attr}_{a_attr}',k_attr)
-
 
         self.has_analysis = True
 
@@ -164,13 +175,16 @@ class Accession:
         #         # raise Exception()
         return self
 
-    DEFAULT_DRAWING_ATTRIBUTES = ('position','gain','velocity','speed')
+    DEFAULT_DRAWING_ATTRIBUTES = ('position',) + KINEMATIC_ATTRIBUTES
 
     def draw(self,
              attributes_to_draw:list=[], 
              region:tuple[float|int]=None,
              tick_dist:float=1.0,
-             use_standard:bool=False):
+             use_standard:bool=False,
+             save_name = '',
+             save_dir = '',
+             do_draw = True):
         """_summary_
 
         Available Attributes:
@@ -192,8 +206,11 @@ class Accession:
         if region is None:
             region = (None, None)
 
+        time_list = self.standard_time_list if use_standard else self.time_list
+        target_list = self.standard_target_list if use_standard else self.target_list
+
         def determine_region(region_tuple):
-            max_end = self.time_list[-1]
+            max_end = time_list[-1]
             start = region_tuple[0]
             end = region_tuple[1]
 
@@ -206,11 +223,14 @@ class Accession:
 
         idp_attr = [x for x in attributes_to_draw 
                         if x in self.DEFAULT_DRAWING_ATTRIBUTES]
-        attr_amt = len(idp_attr)+1 # keep 1 for target
+        attr_amt = len(idp_attr)
+        if not attr_amt:
+            print('NEED ATTRIBUTES TO DRAW!')
+            return
 
         fig, axs = plt.subplots(nrows = attr_amt,
                                 figsize=(24,attr_amt*6), 
-                                dpi=150, 
+                                dpi=72, 
                                 sharex=True, 
                                 constrained_layout=True)
 
@@ -220,63 +240,129 @@ class Accession:
             axs = [axs]
         axs : list[plt.Axes]
 
-        figure_title = f'{self.accession}' 
+        figure_title = f'{self.accession[0]:02d}-{self.accession[1]:02d} | ' 
+        figure_title += f'Axis: {self.axis} | Freq: {self.frequency} | '
+        figure_title += f'Time: {region[0]:02d} - {region[1]:02d} seconds'
         fig.suptitle(figure_title)
 
-        ax0_title = 'Target'
+        # ax0_title = 'Target'
         
-        axs[0].set_ylim(-20.2,20.2)
-        axs[0].set_xlim(*region)
-        axs[0].set_xticks(float_range(*region, tick_dist))
-        axs[0].set_ylabel('Degrees')
-        axs[0].grid(True)
+        # axs[0].set_ylim(-20.2,20.2)
+        # axs[0].set_xlim(*region)
+        # axs[0].set_xticks(float_range(*region, tick_dist))
+        # axs[0].set_ylabel('Degrees')
+        # axs[0].grid(True)
 
-        axs[0].plot(self.time_list, self.target_list, label='Target List')
+        # axs[0].plot(time_list, target_list, label='Target List')
 
-        if 'jump' in attributes_to_draw:
-            ax0_title += ' + Jumps'
-            for jump_dir, jump_colour in zip(('positive','negative'),('blue',(0.8,0.52,0.01))):
-                jump_dirs, _ = zip(*self.jump_ids)
-                if jump_dir not in jump_dirs:
-                    print(f'skipped {jump_dir}')
-                    continue
-                jump_time, jump_y = zip(*[(self.time_list[idx],self.target_list[idx]) 
-                                          for _,idx 
-                                          in self.jump_ids if _ == jump_dir])
-                axs[0].scatter(jump_time, jump_y, color = jump_colour, zorder=3)
+        # if 'jump' in attributes_to_draw:
+        #     ax0_title += ' + Jumps'
+        #     for jump_dir, jump_colour in zip(('positive','negative'),('blue',(0.8,0.52,0.01))):
+        #         jump_dirs, _ = zip(*self.jump_ids)
+        #         if jump_dir not in jump_dirs:
+        #             print(f'skipped {jump_dir}')
+        #             continue
+        #         jump_time, jump_y = zip(*[(time_list[idx],target_list[idx]) 
+        #                                   for _,idx 
+        #                                   in self.jump_ids if _ == jump_dir])
+        #         axs[0].scatter(jump_time, jump_y, color = jump_colour, zorder=3)
             
-        axs[0].set_title(ax0_title)
+        # axs[0].set_title(ax0_title)
 
         lr_colour = [
-            (0.303,0.322,0.765),
-            (0.263,0.845,0.321),
-            (0.745,0.686,0.221)
+            (0.303,0.322,0.865), # LEFT
+            (0.263,0.845,0.321), # RIGHT
+            (0.945,0.121,0.221), # AVG
         ]
 
-        for attr_idx, attribute in enumerate(idp_attr, start=1):
+        y_data = {
+                'position':((-20.2,20.2),'Degree'),
+                'speed':((0,600),'Deg/Sec'),
+                'velocity':((-600,600),'Deg/Sec'),
+                'gain':((-0.25,1.25),''),
+                'acceleration':((-1000,1000),'Deg Sec^-2')
+        }
+
+        for attr_idx, attribute in enumerate(idp_attr, start=0):
             ax = axs[attr_idx]
 
-            if attribute == 'position':
-                data = self.position_dict
-                ylim = (-20.2,20.2)
+            # DRAW ATTRIBUTE
+            standard_attribute = f'standard_{attribute}' if use_standard else attribute
+            data = getattr(self,f'{standard_attribute}_dict')
+            
+            y_lim, y_unit = y_data[attribute]
+
+            if getattr(self,f'{attribute}_is_normal','raw') == 'raw':
+                ax.set_ylim(*y_lim)
             else:
-                ylim = (-0.05,1.05)
-            if attribute == 'velocity':
-                data = self.velocity_dict
-            if attribute == 'speed':
-                data = self.speed_dict
-            if attribute == 'gain':
-                data = self.gain_dict
+                ax.set_ylim(-0.05,1.05)
             
             for colour, (k, v) in zip(lr_colour, data.items()):
-                ax.plot(self.time_list, v, label=f"{attribute}_{k}", color=colour)
+                ax.plot(time_list, v, label=f"{attribute}_{k}", color=colour)
+
+            # DRAW TARGET
+            ax2 = ax.twinx()
+            ax2.plot(time_list,target_list,linestyle=":",color=(0.666,0.646,0.965),linewidth=3.5,label='Target',zorder=30)
+            ax2.set_ylim(-20.2,20.2)
+            ax2.set_ylabel('Target (Deg)')
+            ax2.legend(loc='lower right')
             
+            ax.set_ylabel(y_unit)
             ax.grid(True),
-            ax.set_ylim(*ylim)
             ax.set_title(attribute)
-            ax.legend()
+            ax.legend(loc='lower left')
+
+            ax.set_xticks(float_range(*region, tick_dist))
+            ax.set_xlim(*region)
+
+        if len(save_name) and len(save_dir):
+            plt.savefig(os.path.join(save_dir,f'{save_name}.jpg'),bbox_inches='tight')
+        
+        if not do_draw:
+            return
 
         plt.show()
+
+    def split_draw(self, attribute_to_show='speed', save_name:str='', save_dir:str=''):
+        if not hasattr(self, 'has_standard'):
+            print('STANDARDISE ACCESSION FIRST!')
+            return
+        
+        attribute_dict = getattr(self,f'standard_{attribute_to_show}_dict')
+        target_list = getattr(self,'standard_target_list')
+
+        cycle_amt = len(self.standard_cycles)
+        n_cols = 7
+        n_rows = (cycle_amt + (cycle_amt%n_cols) + 4)//n_cols
+        
+        fig, axs = plt.subplots(nrows=n_rows, ncols=n_cols, dpi=150, figsize=(24,24), constrained_layout=True)
+        fig.suptitle(f'Split draw {attribute_to_show} ({self.accession_str})')
+        axs_flat = axs.flatten()
+        for cycle_idx, (cycle_start, cycle_end) in enumerate(self.standard_cycles):
+            ax:plt.Axes = axs_flat[cycle_idx]
+            
+            cycle_target = target_list[cycle_start:cycle_end]
+
+            for k, v in attribute_dict.items():
+                cycle_attr = v[cycle_start:cycle_end]
+                ax.plot(cycle_attr, label = f'{attribute_to_show} {k}')
+
+            ax2 = ax.twinx()
+            ax2.plot(cycle_target, label = 'Target')
+
+            ax.set_title(f'{cycle_start} - {cycle_end} ({cycle_idx})')
+
+            ax.set_xlim(0,self.standard_cycle_length)
+            ax.grid(True)
+
+            if cycle_idx == 0:
+                ax.legend()
+
+        if len(save_name) > 0:
+            plt.savefig(os.path.join(save_dir))
+        
+        plt.show()
+        
 
     def standardise_cycles(self):
         """Stitches cycles in a recording to be equal in length to the standard cycle length
@@ -289,16 +375,16 @@ class Accession:
         valid_cycles = [(start,end) for start,end in self.cycles
                            if (end - start - 1) >= self.standard_cycle_length]
         
-        self.standard_cycles = [(start,start+self.standard_cycle_length+1)
+        self.standard_cycles = [(start,start+self.standard_cycle_length)
                                 for start in range(0,
                                                    len(valid_cycles)*self.standard_cycle_length + 1, 
-                                                   self.standard_cycle_length+1)]
+                                                   self.standard_cycle_length)]
 
         standard_dict = {}
         self.standard_analysis = {}
 
         for start, end in valid_cycles:
-            standard_dict['time_list'] = standard_dict.setdefault('time_list',[])\
+            standard_dict['actual_time_list'] = standard_dict.setdefault('actual_time_list',[])\
                                             + transfer_indices(self.time_list[start:end], self.standard_cycle_length)
             standard_dict['target_list'] = standard_dict.setdefault('target_list',[])\
                                             + transfer_indices(self.target_list[start:end], self.standard_cycle_length)
@@ -338,6 +424,8 @@ class Accession:
                         'std':analysis_var**0.5
                     }
                     analysis_kine[attr_k] = analysis_kine.setdefault(attr_k,[]) + [analysis]
+
+        standard_dict['time_list'] = float_range(0,1/120*(len(standard_dict['actual_time_list'])-1),1/120)
 
         for k, v in standard_dict.items():
             setattr(self, f'standard_{k}', v)

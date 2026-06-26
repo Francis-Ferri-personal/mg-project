@@ -195,12 +195,13 @@ def find_jumps(target_list:list, direction:str='both', debug=-1) -> list[tuple[s
     
     return out+jumps_ids
 
-def find_gain(position_series:list, target_series:list) -> list:
+def find_gain(position_series:list, target_series:list, do_clamp=True) -> list:
     """Finds the ratio of position from target, normalised in 0 to 1 scale
 
     Args:
         position_series (list): Position as a list
         target_series (list): Targets as a list
+        do_clamp (bool): Clamps output to 0,1 range
 
     Returns:
         list: A list of gain
@@ -211,9 +212,6 @@ def find_gain(position_series:list, target_series:list) -> list:
         if t == 0:
             gain_series.append(0)
             continue
-        if t < 0:
-            gain_series.append(lerp(p/t,1.0,-1.0,0.0,1.0))
-            continue
-        gain_series.append(lerp(p/t,-1.0,1.0,0.0,1.0))
+        gain_series.append(lerp(p/t,-1.0,1.0,0.0,1.0,do_clamp))
 
     return gain_series
