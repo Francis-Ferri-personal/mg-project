@@ -80,11 +80,11 @@ class Accession:
         'speed':{'rawness':'raw','value_smoothing':3,'source_smoothing':0},
     }
 
-    def __translate_accession_str(accession_str:str) -> dict:
+    def _translate_accession_str(accession_str:str) -> dict:
         as_list = [int(x) for x in accession_str]
         accession_info = {k:v for k,v in zip(('pathology_class','patient_index','visit_idx','axis_idx','file_idx'))}
 
-    def __find_jumps(target_list:list, direction:str='both', debug=-1) -> list[tuple[str,int]]:
+    def _find_jumps(target_list:list, direction:str='both', debug=-1) -> list[tuple[str,int]]:
         """Finds jumps in targets
 
         Args:
@@ -125,7 +125,7 @@ class Accession:
         
         return out+jumps_ids
     
-    def __find_gain(position_series:list, target_series:list, do_clamp=True) -> list:
+    def _find_gain(position_series:list, target_series:list, do_clamp=True) -> list:
         """Finds the ratio of position from target, normalised in 0 to 1 scale
 
         Args:
@@ -146,7 +146,7 @@ class Accession:
 
         return gain_series
     
-    def __longest_continuous_subsequence(series):
+    def _longest_continuous_subsequence(series):
         """Find longest continuous subsequence using start and length."""
         if not series:
             return []
@@ -176,7 +176,7 @@ class Accession:
         
         return [best_start, best_start + best_len]
     
-    def __find_calibration(target_list) -> dict:
+    def _find_calibration(target_list) -> dict:
         calibration_info = {
             'exists': False,
             'length': -1,
@@ -199,12 +199,12 @@ class Accession:
 
         return calibration_info
     
-    def __find_energy_power(series:list, max_time:float):
+    def _find_energy_power(series:list, max_time:float):
         energy = sum([x*x for x in series])
         power = energy/max_time
         return energy, power
 
-    def __analyse_jumps(jump_ids) -> dict:
+    def _analyse_jumps(jump_ids) -> dict:
         first_cycle_direction = jump_ids[0][0]
         cycles = [idx for direction,idx in jump_ids 
                     if direction == first_cycle_direction]
@@ -212,7 +212,7 @@ class Accession:
 
         return {'first_cycle_direction':first_cycle_direction, 'cycles':cycles}
 
-    def __analyse_position(df, sides_of_interest, calibration_info) -> tuple[dict]:
+    def _analyse_position(df, sides_of_interest, calibration_info) -> tuple[dict]:
         position_dict = {}
         calibration_dict = {}
         
@@ -237,17 +237,17 @@ class Accession:
 
         return position_dict, calibration_dict
     
-    def __get_basic_info_from_df(input_df:DataFrame, axis:str) -> dict:
+    def _get_basic_info_from_df(input_df:DataFrame, axis:str) -> dict:
         sides_of_interest = [f'{x}{axis[0].upper()}' for x in 'LR'] + ['AVG']
         time_list = list(input_df['Time(sec)'])
 
         target_list = list(input_df[f'Target{axis[0].upper()}'])
-        calibration_info = Accession.__find_calibration(target_list)
+        calibration_info = Accession._find_calibration(target_list)
 
-        jump_ids = Accession.__find_jumps(target_list, 'both')
-        processed_jumps = Accession.__analyse_jumps(jump_ids)
+        jump_ids = Accession._find_jumps(target_list, 'both')
+        processed_jumps = Accession._analyse_jumps(jump_ids)
 
-        position_dict, calibration_dict = Accession.__analyse_position(input_df, 
+        position_dict, calibration_dict = Accession._analyse_position(input_df, 
                                                     sides_of_interest, 
                                                     calibration_info)
         
@@ -264,7 +264,7 @@ class Accession:
 
         return output_dict
     
-    def __get_kinematics(position_dict:dict, time_list:list, target_list:list, analysis_attrs:dict) -> dict:
+    def _get_kinematics(position_dict:dict, time_list:list, target_list:list, analysis_attrs:dict) -> dict:
         output_dict = {}
 
         kinematic_attrs = [kine_attr 
@@ -297,7 +297,7 @@ class Accession:
                 
             if kine_attr == 'gain':
                 attr_clamp = attr_info.get('do_clamp',True)
-                attr_dict = {k:Accession.__find_gain(rolling_average(v,attr_source_smoothing), target_list, attr_clamp) 
+                attr_dict = {k:Accession._find_gain(rolling_average(v,attr_source_smoothing), target_list, attr_clamp) 
                              for k,v in position_dict.items()}
                 
             if kine_attr == 'acceleration':
@@ -328,7 +328,7 @@ class Accession:
             tmp_power_dict = {}
 
             for k,v in kine_info.items():
-                tmp_energy_dict[k], tmp_power_dict[k] = Accession.__find_energy_power(v, time_list[-1])
+                tmp_energy_dict[k], tmp_power_dict[k] = Accession._find_energy_power(v, time_list[-1])
 
             energy_dict[kine] = tmp_energy_dict
             power_dict[kine] = tmp_power_dict
@@ -338,7 +338,7 @@ class Accession:
 
         return output_dict
     
-    def __standardise_df(input_df_path) -> DataFrame:
+    def _standardise_df(input_df_path) -> DataFrame:
         df = read_csv(input_df_path, encoding = CSV_ENCODING)
         df.columns = df.columns.str.replace(' ','')
         return df
@@ -388,15 +388,15 @@ class Accession:
             #dont try to read...
             pass
 
-        df = Accession.__standardise_df(self.accession_path)
+        df = Accession._standardise_df(self.accession_path)
 
         self.analysis_info = {
             'has':False,
             'info': {}
         }
 
-        basic_info = Accession.__get_basic_info_from_df(df, self.axis)
-        output_dict = Accession.__get_kinematics(
+        basic_info = Accession._get_basic_info_from_df(df, self.axis)
+        output_dict = Accession._get_kinematics(
             basic_info['position_dict'], basic_info['time_list'], basic_info['target_list'], analysis_attrs
         )
 
