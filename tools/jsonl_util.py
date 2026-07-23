@@ -3,9 +3,10 @@ import json
 class JSONLREADER:
     def __init__(self, path):
         self.path = path
+        self._get_indices()
 
     @staticmethod
-    def __getindices(path) -> list[int]:
+    def _static_getindices(path) -> list[int]:
         indices = []
         with open(path,'r') as f:
             seek_pos = 0
@@ -19,15 +20,18 @@ class JSONLREADER:
                 indices.append(seek_pos)
                 seek_pos = f.tell()
         return indices
+
+    def __len__(self):
+        return len(self.indices)
     
-    def get_indices(self):
-        self.indices = getattr(self,'indices',self.__getindices(self.path))
+    def _get_indices(self):
+        self.indices = getattr(self,'indices',self._static_getindices(self.path))
         return self
     
     @staticmethod
     def read_from(path:str, index:int, indices = None) -> dict:
         if indices is None:
-            indices = JSONLREADER.__getindices(path)
+            indices = JSONLREADER._static_getindices(path)
         
         with open(path,'rb') as f:
             f.seek(indices[index])
@@ -35,7 +39,7 @@ class JSONLREADER:
         
     def read(self, index) -> dict:
         if getattr(self,'indices',None) is None:
-            self.indices = self.__getindices(self.path)
+            self.indices = self._get_indices(self.path)
         
         return self.read_from(self.path, index, self.indices)
     

@@ -185,7 +185,7 @@ class Accession:
 
         calibration_bundle = [idx for idx, val in enumerate(target_list) if abs(val)<=0.5]
 
-        calibration_indices = Accession.__longest_continuous_subsequence(calibration_bundle)
+        calibration_indices = Accession._longest_continuous_subsequence(calibration_bundle)
 
         if len(calibration_indices) < 2:
             return calibration_info
