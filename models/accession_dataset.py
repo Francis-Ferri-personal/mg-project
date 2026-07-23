@@ -2,7 +2,6 @@ import json
 import torch
 from torch.utils.data import Dataset
 
-
 class AccessionDataset(Dataset):
     """
     Dataset for Myasthenia Gravis (MG) binary classification using extracted features.
