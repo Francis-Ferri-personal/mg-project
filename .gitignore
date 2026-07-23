@@ -1,8 +1,6 @@
 __pycache__
 out
 .venv
-usask-ois-venv/
-
 data
 *.zip
 
