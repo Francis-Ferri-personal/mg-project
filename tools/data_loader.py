@@ -3,6 +3,8 @@ import sys
 from .utils import get_all_csv
 import json
 
+DEFAULT_DIRS = ('Definite MG','Healthy control','Probable MG', 'Non-MG diplopia (CNP, etc)')
+
 def import_database(database_directory:str,
                     valid_directories:list[str]) -> dict:
     """Import Database from a directory
@@ -34,7 +36,7 @@ def import_database(database_directory:str,
     subdirs_key = map(lambda x: os.path.join(database_directory, x), valid_directories)
 
     all_csv = [get_all_csv(subdir) for subdir in subdirs_key]
-    json.dump(all_csv, open('all_csv.json','w'), indent=4)
+    # json.dump(all_csv, open('all_csv.json','w'), indent=4)
 
 
     csv_access = dict()

@@ -4,11 +4,12 @@ This project processes ocular signal data from patients to classify visits as `D
 
 ## Repository structure
 
-- `01-datset-gen.ipynb` - Notebook to generate the dataset and prepare the input JSON files.
-- `02-analysis.ipynb` - Notebook for exploratory data analysis and feature validation.
-- `03-training.ipynb` - Training notebook that builds the dataset, creates folds, and trains the model.
+- notebooks/
+  - `01-dataset-generation.ipynb` - Notebook to generate the dataset and prepare the input JSONL files.
+  - `02-statistics_test.ipynb` - Notebook for exploratory data analysis and feature validation.
+  - `03-training.ipynb` - Training notebook that builds the dataset, creates folds, and trains the model.
 - `data/` - Raw data organized in folders by label and date.
-- `out/` - Generated outputs, including the processed dataset and `cv_config.json`.
+- `export/` - Generated outputs, including the processed dataset and `cv_config.json`.
 - `models/`
   - `accession_dataset.py` - Custom PyTorch dataset that reads JSON files, extracts window-level features, and handles variable-length sequences.
   - `lstm.py` - `OcularStatefulLSTM` model that processes temporal feature sequences with an LSTM.
