@@ -184,7 +184,7 @@ def analyse_multi_channel_signal(signal:dict[str, list[float]],
 def analyse_record(accession_str:str, 
                    raw_info:dict,  
                    cycle_length:int, 
-                   output_dict:dict=None) -> dict:
+                   output_dict:dict=None, **kwargs) -> dict:
     
     output_result = analyse_multi_channel_signal(
         raw_info['position_dict'], cycle_length, True
