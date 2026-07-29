@@ -139,6 +139,7 @@ def analyse_multi_channel_signal(signal:dict[str, list[float]],
             channel_statistics |= {
                 'low_state_amplitude':(lsm:=low_state['percentiles']['50%']),
                 'high_state_amplitude':(hsm:=high_state['percentiles']['50%']),
+                'baseline':((lsm+hsm)/2),
                 'state_separation': channel_percentiles['60%'] - channel_percentiles['40%'],
                 'state_symmetry_ratio':hsm and abs(lsm)/abs(hsm) or 0,
             }

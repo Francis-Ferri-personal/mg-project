@@ -1,5 +1,10 @@
+import functools
+import matplotlib
+import os
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+
 from tools.recording_analysis import RECORDING_ANALYSIS_SIDES
 
 STATS_DISPLAY_CENTRALITIES = {
@@ -22,6 +27,8 @@ STATS_DISPLAY_DEFAULT = {
     '95%':{'marker':'.','color':(0.3,0.73,0.54),'label':'95th percentile'},
     '5%':{'marker':'.','color':(0.68,0.33,0.72),'label':'5th percentile'}
 }
+
+DEFAULT_RENDER_BACKEND = matplotlib.get_backend()
 
 class RecordingVisualiser:
     accepted_kwargs = (
@@ -46,12 +53,93 @@ class RecordingVisualiser:
                 continue
             setattr(self, k, v)
 
+    @classmethod
+    def data_of(cls, list_of_cycles, accession_str, accession_data, **kwargs):
+        return cls(**kwargs)
+
     @staticmethod
-    def draw_whole_recording_of(
-            list_of_cycles:list[dict[str,list[float]]],
-            title : str = 'Whole Recording',
-            canvas: tuple[plt.Figure, plt.Axes] = None,
-            **canvas_kwargs):
+    def _canvas_constructor_factory(is_interactive:bool, **canvas_kwargs):
+        if is_interactive:
+            plt.ion()
+
+        else:
+            plt.ioff()
+
+        def canvas_constructor(**kwargs) -> tuple[plt.Figure,]:
+            """
+            The actual constructor that creates the figure and axes.
+            Accepts any kwargs that plt.subplots() accepts.
+            """
+            # Merge with some sensible defaults if you want, or let the caller decide.
+            kwargs['constrained_layout'] = True
+            fig, axs = plt.subplots(**kwargs)
+
+            # Ensure axs is always a list/array for consistent iteration
+            try:
+                ax = axs[0]
+            except TypeError:
+                axs = [axs]
+            
+            return fig, axs
+        
+        return canvas_constructor
+
+    @staticmethod
+    def save_graph(
+        func,
+        target_dir:str, 
+        my_file_name:str = None, 
+        target_extension:str='png', 
+        do_overwrite:bool=False,
+        *args,**kwargs
+    ) -> str:
+        canvas_constructor = RecordingVisualiser._canvas_constructor_factory(False)    
+        kwargs['canvas_constructor'] = canvas_constructor
+
+        fig = func(*args, **kwargs)
+        fig:plt.Figure
+
+        if my_file_name is None:
+            target_name : str = func.__name__
+        else:
+            target_name = my_file_name
+                
+        file_name = f'{target_name}.{target_extension}'
+        file_path = os.path.join(target_dir, file_name)
+
+        if not do_overwrite and os.path.exists(file_path):
+            return file_path
+        if do_overwrite and os.path.isfile(file_path):
+            os.remove(file_path)
+
+        try:
+            fig.savefig(file_path)
+        finally:
+            plt.close('all'),
+            del fig
+
+        return file_path
+
+    @staticmethod
+    def show_graph(func, *args, **kwargs):
+        canvas_constructor = RecordingVisualiser._canvas_constructor_factory(
+            True
+        )
+        kwargs['canvas_constructor'] = canvas_constructor
+
+        fig = func(*args, **kwargs)
+
+        fig:plt.Figure
+
+        plt.show()
+        plt.close(fig)
+
+    def draw_whole_recording(
+        list_of_cycles:list[dict[str,list[float]]],
+        canvas_constructor=None,
+        title : str = 'Whole Recording',
+        **canvas_kwargs
+    ) -> plt.Figure:
         """Draws an entire recording's cycles. Pass in the recordings cycle as a list
 
         Expected list_of_cycles structure:
@@ -68,20 +156,18 @@ class RecordingVisualiser:
             list_of_cycles (list[dict[str,list[float]]]): A list of cycles with time_list and target_list
         """
         default_fig_args = {
+            'nrows' : 3,
             'figsize' : (24,14),
             'dpi' : 100,
         }
+
         canvas_kwargs = {} if canvas_kwargs is None else canvas_kwargs
         fig_args = default_fig_args | canvas_kwargs
 
-        if canvas is None:
-            fig, axs = plt.subplots(
-                nrows=3, constrained_layout = True, **fig_args
-            )
-        else:
-            fig, axs = canvas
-            if axs.get_gridspec().nrows != 3:
-                raise IndexError("canvas must have an axes with 3 rows")
+        fig, axs = canvas_constructor(**fig_args)
+
+        fig:plt.Figure
+        axs:list[plt.Axes]
 
         fig.suptitle(title)
         
@@ -106,23 +192,32 @@ class RecordingVisualiser:
 
             ax.set_title(side)
 
-        plt.show()
+        return fig
 
-    def draw_whole_recording(self, title:str=None, **canvas_kwargs):
+    def draw_whole_recording(
+        self, 
+        canvas_constructor=None, 
+        title:str=None, 
+        **canvas_kwargs
+    )-> plt.Figure:
+        
         if title is None:
             title = self.canvas_title
 
-        self.draw_whole_recording_of(
-            self.list_of_cycles, title=title, canvas=None, **canvas_kwargs
+        return self.draw_whole_recording_of(
+            self.list_of_cycles, canvas_constructor, 
+            title=title, **canvas_kwargs
         )
+
 
     @staticmethod
     def draw_statistics_over_cycles_of(
         list_of_cycles_stats:list[dict[str,]],
+        canvas_constructor=None,
         stats_display_options:dict[str,dict[str,]] = STATS_DISPLAY_DEFAULT,
         title : str = 'Stats Over Cycles',
-        canvas : tuple[plt.Figure, plt.Axes] = None,
-        **canvas_kwargs):
+        **canvas_kwargs
+    ) -> plt.Figure:
         """Draws the statistics of each cycle, pass in the list of cycle statistics and the options to display
         by default it draws the 5th and 95th percentile, mean, and median.
 
@@ -145,21 +240,17 @@ class RecordingVisualiser:
                 - custom stats display dicts
         """
         default_fig_args = {
+            'nrows' : 3,
             'figsize' : (24,14),
             'dpi' : 100,
         }
         canvas_kwargs = {} if canvas_kwargs is None else canvas_kwargs
         fig_args = default_fig_args | canvas_kwargs
 
-        if canvas is None:
-            fig, axs = plt.subplots(
-                nrows=3, constrained_layout = True, **fig_args
-            )
-        else:
-            fig, axs = canvas
-            nrows = axs.get_gridspec().nrows
-            if not nrows == 3:
-                raise IndexError("canvas must have an axes with 3 rows")
+        fig, axs = canvas_constructor(**fig_args)
+
+        fig:plt.Figure
+        axs:list[plt.Axes]
 
         fig.suptitle(title)
         
@@ -206,13 +297,16 @@ class RecordingVisualiser:
                 if side_idx == 2:
                     ax.set_xlabel('Cycle Number')
             
-        plt.show()
+        return fig
 
     def draw_statistics_over_cycles(
-            self, 
-            stats_display_options: dict[str,dict[str,]] = STATS_DISPLAY_DEFAULT,
-            list_of_cycles_stats : list[dict[str,]] = None, 
-            title:str = None, **canvas_kwargs):
+        self, 
+        canvas_constructor=None,
+        stats_display_options: dict[str,dict[str,]] = STATS_DISPLAY_DEFAULT,
+        list_of_cycles_stats : list[dict[str,]] = None, 
+        title:str = None, 
+        **canvas_kwargs
+    ) -> plt.Figure:
         
         if title is None:
             title = self.canvas_title
@@ -222,17 +316,24 @@ class RecordingVisualiser:
         if list_of_cycles_stats is None:
             raise KeyError("draw_statistics_over_cycles needs instance to have list_of_cycles_stats in instance or as an argument")
 
-        self.draw_statistics_over_cycles_of(
-            list_of_cycles_stats, stats_display_options, title=title, canvas=None, **canvas_kwargs
+        return self.draw_statistics_over_cycles_of(
+            list_of_cycles_stats, 
+            canvas_constructor,
+            stats_display_options, 
+            title=title,
+            **canvas_kwargs
         )
 
     @staticmethod
     def draw_single_cycle_of(
-            cycle_dict: dict[str,list[float]],
-            representative_cycle: dict[str,list[float]]=None,
-            title : str = 'Stats Over Cycles',
-            canvas : tuple[plt.Figure, plt.Axes] = None,
-            **canvas_kwargs):
+        cycle_dict: dict[str,list[float]],
+        canvas_constructor=None,
+        representative_cycle: dict[str,list[float]]=None,
+        title : str = 'Stats Over Cycles',
+        value_y_bounds: tuple = (-24.2,24.2),
+        value_y_step: float = 5,
+        **canvas_kwargs
+    ) -> plt.Figure:
         """Draws a single cycle's signal, if given a representative cycle, will draw it in twinx
 
         Args:
@@ -240,22 +341,19 @@ class RecordingVisualiser:
             representative_cycle (dict[str,list[float]], optional): Like cycle_dict. Defaults to None.
         """
         default_fig_args = {
-            'figsize' : (24,14),
+            'nrows':1,
+            'figsize':(24,14),
             'dpi' : 100,
         }
         canvas_kwargs = {} if canvas_kwargs is None else canvas_kwargs
         fig_args = default_fig_args | canvas_kwargs
 
-        if canvas is None:
-            fig, ax = plt.subplots(
-                nrows=1, constrained_layout = True, **fig_args
-            )
+        fig, axs = canvas_constructor(**fig_args)
 
-        else:
-            fig, ax = canvas
-            nrows = ax.get_gridspec().nrows
-            if not nrows == 1:
-                raise IndexError("canvas must have an axes with 1 rows")
+        fig:plt.Figure
+        axs:list[plt.Axes]
+
+        ax = axs[0]
 
         fig.suptitle(title)
 
@@ -281,41 +379,53 @@ class RecordingVisualiser:
                 cycle_dict['target_list'], 
                 linestyle=":", linewidth = 2, alpha = 0.65, label='target'
             )
-            ax2.set_ybound(-24.2,24.2)
             ax2.legend(loc="upper right")
             
 
         ax.grid(True)
         ax.grid(True, 'minor', alpha=0.3)
 
-        ax.set_ybound(-24.2,24.2)
+        if value_y_bounds is not None:
+            ax.set_ybound(*value_y_bounds)
+
         ax.set_xbound(-1,len(cycle_dict['AVG']))
 
         ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
         ax.xaxis.set_minor_locator(ticker.MultipleLocator(1))
 
-        ax.yaxis.set_major_locator(ticker.MultipleLocator(5))
-        ax.yaxis.set_minor_locator(ticker.MultipleLocator(1))
+        if value_y_step is not None:
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(value_y_step))
+            ax.yaxis.set_minor_locator(ticker.MultipleLocator(value_y_step/5))
 
         ax.set_xlabel('Sample Count')
         ax.set_ylabel('Degrees (Cycle)')
 
         ax.legend(loc="upper left")
 
-        plt.show()
+        return fig
 
     def draw_single_cycle(
-            self, cycle_idx:int, 
-            representative_cycle:dict[str,list[float]] = None, 
-            title:str=None, **canvas_kwargs):
+        self, 
+        cycle_idx:int,
+        canvas_constructor=None, 
+        representative_cycle:dict[str,list[float]] = None, 
+        title:str=None, 
+        **canvas_kwargs
+    ) -> plt.Figure:
         
         if title is None:
             title = self.canvas_title
 
-        representative_cycle = getattr(self, 'representative_cycle', representative_cycle)
+        representative_cycle = getattr(
+            self, 'representative_cycle', representative_cycle
+        )
 
         cycle = self.list_of_cycles[cycle_idx]
 
-        self.draw_single_cycle_of(
-            cycle, representative_cycle, title=title, canvas=None, **canvas_kwargs
+        return self.draw_single_cycle_of(
+            cycle, 
+            canvas_constructor,
+            representative_cycle, 
+            title=title,  
+            **canvas_kwargs
         )
