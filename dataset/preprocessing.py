@@ -15,19 +15,18 @@ def find_jumps(target_list: list) -> list[tuple[str, int]]:
     return jumps_ids
 
 
-def analyse_jumps(jump_ids: list[tuple[str, int]]) -> dict:
+def analyse_jumps(jump_ids: list[tuple[str, int]]) -> list[tuple[int, int]]:
+    """Group consecutive positive jumps into (start, end) cycles."""
     if not jump_ids:
-        return {"cycles": []}
+        return []
 
     same_dir_indices = [
         idx for direction, idx in jump_ids if direction == "positive"
     ]
-    cycles = [
+    return [
         (same_dir_indices[i], same_dir_indices[i + 1])
         for i in range(len(same_dir_indices) - 1)
     ]
-
-    return cycles
 
 
 def get_cycles(target_list: list) -> list[tuple[int, int]]:

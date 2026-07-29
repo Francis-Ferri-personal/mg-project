@@ -25,3 +25,25 @@ def visualize_raw(data: dict, title: str = None) -> plt.Figure:
     ax.xaxis.set_major_locator(ticker.AutoLocator())
 
     return fig
+
+
+def visualize_cycles(t: list, target: list, cycles: list[tuple[int, int]], title: str = "") -> plt.Figure:
+
+    colors = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4"]
+
+    fig, ax = plt.subplots(1, 1, figsize=(16, 5), constrained_layout=True)
+    fig.suptitle(title)
+
+    ax.plot(t, target, color="gray", linewidth=0.5, alpha=0.4)
+
+    for i, (s, e) in enumerate(cycles):
+        c = colors[i % len(colors)]
+        ax.plot(t[s:e], target[s:e], color=c, linewidth=1.5, label=f"Cycle {i+1}" if i < len(colors) else "")
+
+    ax.set_ylabel("Degrees")
+    ax.set_xlabel("Time (sec)")
+    ax.legend(ncols=5, fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_locator(ticker.AutoLocator())
+
+    return fig

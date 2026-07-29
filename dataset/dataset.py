@@ -125,7 +125,7 @@ if __name__ == "__main__":
     dataset_dir = os.path.dirname(__file__)
 
     import matplotlib.pyplot as plt
-    from tools.visualize import visualize_raw
+    from tools.visualize import visualize_raw, visualize_cycles
 
     ds = MGDataset()
     print(f"Groups: {ds.groups}")
@@ -153,6 +153,9 @@ if __name__ == "__main__":
 
     from preprocessing import get_cycles
     cycles = get_cycles(sample["Target"])
+
+    img_cycles = visualize_cycles(sample["time"],sample["Target"], cycles)
+    plt.savefig('dataset/cycles.jpg')
 
 
     print(cycles)
