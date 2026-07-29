@@ -105,7 +105,7 @@ def channel_cross_correlation_helper(channel1, channel2, cycle_period) -> tuple[
 def analyse_multi_channel_signal(signal:dict[str, list[float]], 
                                  cycle_length:int, 
                                  do_state_analysis:bool=False,
-                                 quantiles:tuple=None):
+                                 quantiles:tuple=DEFAULT_PERCENTILES):
     """Gets basic statistics of a signal for each channel
 
     Args:
@@ -139,6 +139,7 @@ def analyse_multi_channel_signal(signal:dict[str, list[float]],
             channel_statistics |= {
                 'low_state_amplitude':(lsm:=low_state['percentiles']['50%']),
                 'high_state_amplitude':(hsm:=high_state['percentiles']['50%']),
+                'baseline':((lsm+hsm)/2),
                 'state_separation': channel_percentiles['60%'] - channel_percentiles['40%'],
                 'state_symmetry_ratio':hsm and abs(lsm)/abs(hsm) or 0,
             }
@@ -181,20 +182,21 @@ def analyse_multi_channel_signal(signal:dict[str, list[float]],
 
     return output_dict
 
-def analyse_record(acc_str:str, raw_info:dict, 
-                    processed_info:dict, cycle_length:int, 
-                    output_dict:dict=None) -> dict:
+def analyse_record(accession_str:str, 
+                   raw_info:dict,  
+                   cycle_length:int, 
+                   output_dict:dict=None, **kwargs) -> dict:
     
     output_result = analyse_multi_channel_signal(
-        processed_info['position_dict'], cycle_length, True
+        raw_info['position_dict'], cycle_length, True
     )
-
+    
     output_result |= {
         'has_calibration':raw_info['calibration_info']['exists'],
         'calibrations':raw_info['calibration_dict'],
     }
 
     if output_dict is not None:
-        output_dict[acc_str] = output_result
+        output_dict[accession_str] = output_result
     
     return output_result
