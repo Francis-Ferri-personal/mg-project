@@ -125,7 +125,7 @@ if __name__ == "__main__":
     dataset_dir = os.path.dirname(__file__)
 
     import matplotlib.pyplot as plt
-    from tools.visualize_raw import visualize_raw
+    from tools.visualize import visualize_raw
 
     ds = MGDataset()
     print(f"Groups: {ds.groups}")
@@ -148,12 +148,13 @@ if __name__ == "__main__":
 
     sample = ds.load_csv(files[0])
     img = visualize_raw(sample)
-    plt.savefig('dataset/test.jpg')
+    plt.savefig('dataset/raw.jpg')
 
 
-    from preprocessing import find_jumps
+    from preprocessing import get_cycles
+    cycles = get_cycles(sample["Target"])
 
-    jumps = find_jumps(sample["Target"])
-    print(jumps)
+
+    print(cycles)
 
     
