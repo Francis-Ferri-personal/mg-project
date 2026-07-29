@@ -144,7 +144,16 @@ if __name__ == "__main__":
         print(f"  {f['axis']} {f['frequency']}: {os.path.basename(f['path'])}")
 
 
-    img = visualize_raw(ds.load_csv(files[1]))
+    
+
+    sample = ds.load_csv(files[0])
+    img = visualize_raw(sample)
     plt.savefig('dataset/test.jpg')
+
+
+    from preprocessing import find_jumps
+
+    jumps = find_jumps(sample["Target"])
+    print(jumps)
 
     
