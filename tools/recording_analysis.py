@@ -1,9 +1,26 @@
 RECORDING_ANALYSIS_SIDES = ('L','R','AVG')
 DEFAULT_PERCENTILES = (1,5,10,20,25,30,40,50,60,70,75,80,90,95,99)
 
-def basic_statistics(series, 
-                     quantiles:tuple = DEFAULT_PERCENTILES,
-                     expected_range:tuple=(-15,15)) -> dict[list, dict, dict]:
+def basic_statistics(
+    series:list[float], 
+    quantiles:tuple = DEFAULT_PERCENTILES,
+    expected_range:tuple=(-15,15)
+) -> dict[str, ]:
+    """Gets basic statistics of a series
+
+    Args:
+        series (list): A series of numbers
+        quantiles (tuple, optional): Quantiles (in percent) to retreive. Defaults to DEFAULT_PERCENTILES.
+        expected_range (tuple, optional): Series boundaries. Defaults to (-15,15).
+
+    Returns:
+        dict[str, ]:
+         - series: the series itself, sorted
+         - percentiles: values of the percentiles, keys are '{quantile}%' (e.g. '50%', '90%')
+         - quantiles_indices: indices of the percentiles
+         - statistics: actual statistics
+    """
+    
     series = sorted(series)
     series_len = len(series)
 
@@ -102,35 +119,53 @@ def channel_cross_correlation_helper(channel1, channel2, cycle_period) -> tuple[
 
     return current_highest, current_shift
 
-def analyse_multi_channel_signal(signal:dict[str, list[float]], 
-                                 cycle_length:int, 
-                                 do_state_analysis:bool=False,
-                                 quantiles:tuple=DEFAULT_PERCENTILES):
+def analyse_multi_channel_signal(
+        signal:dict[str, list[float]], 
+        channel_names:tuple = RECORDING_ANALYSIS_SIDES,
+        cycle_length:int = None, 
+        do_state_analysis:bool=False,
+        quantiles:tuple=DEFAULT_PERCENTILES
+    ) -> dict[str,dict[str]]:
     """Gets basic statistics of a signal for each channel
 
+    if cycle_length is given a number, will return cross channel statistics
+    for the first two channels in channel_names
+
     Args:
-        signal (dict[str, list[float]]): Expects a dictionary with L, R, AVG as keys where each values is a list of float
-        cycle_length (int): length of cycle, for cross-correlation
+        signal (dict[str, list[float]]): Expects a dictionary with channel names as keys where each value is a list of float
+        channel_name (tuple, optional): a tuple containing channel keys. Defaults to ('L','R','AVG')
+        cycle_length (int, optional): length of cycle, for cross-correlation. If None, will not return cross_channel_statistics
         do_state_analysis (bool, optional): For square signals. Defaults to False.
 
     Returns:
         dict:
-        - percentiles
-        - statistics
-        - cross_channel_statistics
-        
-        if do_state_analysis is set to True, the following keys are available as well:
-            - low_state_statistics
-            - high_state_statistics
+        - channel:
+            - percentiles
+            - statistics
+            - cross_channel_statistics (optional)
+            
+            if do_state_analysis is set to True, the following keys are available as well:
+                - low_state_statistics
+                - high_state_statistics
     """
     # PER CHANNEL STUFF
     channel_series_dict = {}
     channel_layer_dict = {}
     
-    for side_idx, side in enumerate(RECORDING_ANALYSIS_SIDES):
-        channel_series = signal[side]
+    for channel_name in channel_names:
+        if channel_name not in signal: #maybe only left and right
+
+            continue
+
+        channel_series = signal[channel_name]
 
         channel_series, channel_percentiles, channel_quant_idx, channel_statistics = basic_statistics(channel_series, quantiles).values()
+        channel_series_dict[channel_name] = channel_series
+
+        channel_output = {
+            'percentiles':channel_percentiles,
+            'statistics':channel_statistics,
+        }
 
         if do_state_analysis:
             low_state = basic_statistics(channel_series[:channel_quant_idx[40]], quantiles, (-20.2,-9.8)) 
@@ -144,41 +179,43 @@ def analyse_multi_channel_signal(signal:dict[str, list[float]],
                 'state_symmetry_ratio':hsm and abs(lsm)/abs(hsm) or 0,
             }
 
-        # OUTPUT
-
-        channel_series_dict[side] = channel_series
-
-        additional_statistics = {}
-        if do_state_analysis:
             additional_statistics = {
                 'low_state_statistics':low_state['statistics'],
                 'high_state_statistics':high_state['statistics'],
             }
 
-        channel_layer_dict[side] = {
-            'percentiles':channel_percentiles,
-            'statistics':channel_statistics,
-            ** additional_statistics
-        }
-    
-    # CROSS CHANNEL STUFF
-    cc_median_diff = channel_layer_dict['L']['percentiles']['50%'] - channel_layer_dict['R']['percentiles']['50%']
-    cc_amplitude_ratio =  channel_layer_dict['R']['statistics']['raw_range'] \
-                            and channel_layer_dict['L']['statistics']['raw_range'] / channel_layer_dict['R']['statistics']['raw_range']\
-                            or 0
-    
-    _, cc_lag = channel_cross_correlation_helper(channel_series_dict['L'],channel_series_dict['R'],cycle_length)
-    
-    cross_channel_statistics = {
-        'median_difference': cc_median_diff,
-        'amplitude_ratio': cc_amplitude_ratio,
-        'lag': cc_lag
-    }
+            channel_output |= additional_statistics
+
+        channel_layer_dict[channel_name] = channel_output
 
     output_dict = {
-        **channel_layer_dict,
-        'cross_channel_statistics':cross_channel_statistics
+        **channel_layer_dict
     }
+
+    # CROSS CHANNEL STUFF
+    if cycle_length is not None:
+        channel_1_name, channel_2_name = channel_names[:2]
+        channel_1_layer = channel_layer_dict[channel_1_name]
+        channel_2_layer = channel_layer_dict[channel_2_name]
+
+        cc_median_diff = channel_1_layer['percentiles']['50%'] - channel_2_layer['percentiles']['50%']
+        cc_amplitude_ratio =  channel_2_layer['statistics']['raw_range'] \
+            and channel_1_layer['statistics']['raw_range'] / channel_2_layer['statistics']['raw_range']\
+            or 0
+        
+        _, cc_lag = channel_cross_correlation_helper(
+            channel_series_dict[channel_1_layer],
+            channel_series_dict[channel_2_layer],
+            cycle_length
+        )
+        
+        cross_channel_statistics = {
+            'median_difference': cc_median_diff,
+            'amplitude_ratio': cc_amplitude_ratio,
+            'lag': cc_lag
+        }
+
+        output_dict['cross_channel_statistics'] = cross_channel_statistics
 
     return output_dict
 
