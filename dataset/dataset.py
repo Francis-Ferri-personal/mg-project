@@ -125,19 +125,21 @@ if __name__ == "__main__":
     dataset_dir = os.path.dirname(__file__)
 
     import matplotlib.pyplot as plt
-    from tools.visualize import visualize_raw, visualize_cycles
+    from tools.visualize import visualize_raw, visualize_cycles, plot_cycles
+
+    id_num = 6
 
     ds = MGDataset()
     print(f"Groups: {ds.groups}")
     print(f"Patients in 'Definite MG': {len(ds.patients('Definite MG'))}")
 
-    first_patient = ds.patients('Definite MG')[0]
-    print(f"First patient: {first_patient}")
+    patient = ds.patients('Definite MG')[id_num]
+    print(f"First patient: {patient}")
 
-    visits = ds.visits('Definite MG', first_patient)
+    visits = ds.visits('Definite MG', patient)
     print(f"Visits: {visits}")
 
-    files = ds.get_files('Definite MG', first_patient, visits[0])
+    files = ds.get_files('Definite MG', patient, visits[0])
     print(f"Files in first visit: {len(files)}")
     
     for f in files:
@@ -148,16 +150,17 @@ if __name__ == "__main__":
 
     sample = ds.load_csv(files[0])
     img = visualize_raw(sample)
-    plt.savefig('dataset/raw.jpg')
+    plt.savefig(f'dataset/raw{id_num}.jpg')
 
 
-    from preprocessing import get_cycles
+    from preprocesing.cycles import get_cycles
     cycles = get_cycles(sample["Target"])
 
     img_cycles = visualize_cycles(sample["time"],sample["Target"], cycles)
-    plt.savefig('dataset/cycles.jpg')
+    plt.savefig(f'dataset/cycles{id_num}.jpg')
 
-
-    print(cycles)
-
+    figs = plot_cycles(sample, cycles)
+    for i, fig in enumerate(figs):
+        fig.savefig(f"dataset/cycle_{i}.png")
+        plt.close(fig)  # liberar memoria
     

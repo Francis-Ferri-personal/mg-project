@@ -47,3 +47,31 @@ def visualize_cycles(t: list, target: list, cycles: list[tuple[int, int]], title
     ax.xaxis.set_major_locator(ticker.AutoLocator())
 
     return fig
+
+
+def plot_cycles(data: dict, cycles: list[tuple[int, int]]) -> list[plt.Figure]:
+    t = data["time"]
+    meta = data.get("meta", {})
+    base_title = f"{meta.get('date','?')} | {meta.get('patient','?')} | {meta.get('group','?')} | {meta.get('axis','?')} {meta.get('frequency','?')}"
+
+    figs = []
+    for i, (s, e) in enumerate(cycles):
+        fig, ax = plt.subplots(1, 1, figsize=(12, 4), constrained_layout=True)
+        fig.suptitle(f"{base_title} | Cycle {i+1}")
+
+        ax.axvline(x=t[s], color="green", linewidth=1, alpha=0.6, linestyle="--")
+        ax.axvline(x=t[e-1], color="red", linewidth=1, alpha=0.6, linestyle="--")
+
+        ax.plot(t[s:e], data["L"][s:e], label="L", linewidth=0.8)
+        ax.plot(t[s:e], data["R"][s:e], label="R", linewidth=0.8)
+        ax.plot(t[s:e], data["Target"][s:e], label="Target", linewidth=0.6, alpha=0.7, color="black", linestyle=":")
+
+        ax.set_ylabel("Degrees")
+        ax.set_xlabel("Time (sec)")
+        ax.legend(ncols=3, fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(ticker.AutoLocator())
+
+        figs.append(fig)
+
+    return figs
