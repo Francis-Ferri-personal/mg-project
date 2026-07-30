@@ -125,9 +125,11 @@ if __name__ == "__main__":
     dataset_dir = os.path.dirname(__file__)
 
     import matplotlib.pyplot as plt
-    from tools.visualize import visualize_raw, visualize_cycles, plot_cycles
+    from tools.visualize import visualize_raw, visualize_cycles, plot_cycles, plot_cycles_comparison
+    from preprocesing.filters import denoise
+    from preprocesing.cycles import get_cycles
 
-    id_num = 6
+    id_num = 15
 
     ds = MGDataset()
     print(f"Groups: {ds.groups}")
@@ -145,22 +147,49 @@ if __name__ == "__main__":
     for f in files:
         print(f"  {f['axis']} {f['frequency']}: {os.path.basename(f['path'])}")
 
-
-    
-
     sample = ds.load_csv(files[0])
-    img = visualize_raw(sample)
-    plt.savefig(f'dataset/raw{id_num}.jpg')
-
-
-    from preprocesing.cycles import get_cycles
     cycles = get_cycles(sample["Target"])
 
-    img_cycles = visualize_cycles(sample["time"],sample["Target"], cycles)
-    plt.savefig(f'dataset/cycles{id_num}.jpg')
+    # ---- test distintos kernels ----
+    kernels = [3, 5, 7, 9, 11]
+    s, e = cycles[0]
+    t_seg = sample["time"][s:e]
+    tgt_seg = sample["Target"][s:e]
 
-    figs = plot_cycles(sample, cycles)
-    for i, fig in enumerate(figs):
-        fig.savefig(f"dataset/cycle_{i}.png")
-        plt.close(fig)  # liberar memoria
+    fig, axes = plt.subplots(len(kernels) + 1, 1, figsize=(14, 12), constrained_layout=True)
+    fig.suptitle(f"Denoise kernel comparison | {sample['meta']['patient']} | Cycle 0")
+
+    axes[0].plot(t_seg, sample["L"][s:e], label="L")
+    axes[0].plot(t_seg, sample["R"][s:e], label="R")
+    axes[0].plot(t_seg, tgt_seg, label="Target", color="black", linestyle=":", alpha=0.6)
+    axes[0].set_title("Original")
+    axes[0].set_ylim(-30, 30)
+    axes[0].legend(ncols=3, fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    for idx, k in enumerate(kernels):
+        L_f = denoise(sample["L"], kernel=k)
+        R_f = denoise(sample["R"], kernel=k)
+        axes[idx + 1].plot(t_seg, L_f[s:e], label="L")
+        axes[idx + 1].plot(t_seg, R_f[s:e], label="R")
+        axes[idx + 1].plot(t_seg, tgt_seg, label="Target", color="black", linestyle=":", alpha=0.6)
+        axes[idx + 1].set_title(f"kernel={k}")
+        axes[idx + 1].set_ylim(-30, 30)
+        axes[idx + 1].legend(ncols=3, fontsize=8)
+        axes[idx + 1].grid(True, alpha=0.3)
+
+    plt.savefig(os.path.join(dataset_dir, f"kernel_comparison_{id_num}.png"))
+
+    # ---- guardar con kernel=7 (default) ----
+    filtered = {
+        "time": sample["time"],
+        "L": denoise(sample["L"], kernel=7),
+        "R": denoise(sample["R"], kernel=7),
+        "Target": sample["Target"],
+        "meta": sample["meta"],
+    }
+
+    figs = plot_cycles_comparison(sample, filtered, cycles, str(id_num))
+    for fig in figs:
+        plt.close(fig)
     

@@ -1,3 +1,4 @@
+import os
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
@@ -72,6 +73,37 @@ def plot_cycles(data: dict, cycles: list[tuple[int, int]]) -> list[plt.Figure]:
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_locator(ticker.AutoLocator())
 
+        figs.append(fig)
+
+    return figs
+
+
+def plot_cycles_comparison(data: dict, filtered_data: dict, cycles: list[tuple[int, int]], patient_id: str, output_dir: str = "dataset") -> list[plt.Figure]:
+    t = data["time"]
+    meta = data.get("meta", {})
+    base_title = f"{meta.get('date','?')} | {meta.get('patient','?')} | {meta.get('group','?')} | {meta.get('axis','?')} {meta.get('frequency','?')}"
+
+    out_path = os.path.join(output_dir, patient_id)
+    os.makedirs(out_path, exist_ok=True)
+
+    figs = []
+    for i, (s, e) in enumerate(cycles):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 4), constrained_layout=True)
+        fig.suptitle(f"{base_title} | Cycle {i+1}")
+
+        for ax, src, label in [(ax1, data, "Original"), (ax2, filtered_data, "Filtered")]:
+            ax.plot(t[s:e], src["L"][s:e], label="L", linewidth=0.8)
+            ax.plot(t[s:e], src["R"][s:e], label="R", linewidth=0.8)
+            ax.plot(t[s:e], src["Target"][s:e], label="Target", linewidth=0.6, alpha=0.7, color="black", linestyle=":")
+            ax.set_title(label)
+            ax.set_ylabel("Degrees")
+            ax.set_xlabel("Time (sec)")
+            ax.set_ylim(-30, 30)
+            ax.legend(ncols=3, fontsize=8)
+            ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_locator(ticker.AutoLocator())
+
+        fig.savefig(os.path.join(out_path, f"cycle_{i}.png"))
         figs.append(fig)
 
     return figs
