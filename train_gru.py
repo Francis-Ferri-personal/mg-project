@@ -9,8 +9,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 
-from models.accession_dataset import AccessionDataset, ocular_collate_fn
-from models.gru import OcularStatefulGRU
+from models.mg_models.accession_dataset import AccessionDataset, ocular_collate_fn
+from models.mg_models.gru import OcularStatefulGRU
 
 SELECTED_FREQUENCY = "1.0"
 DATASET_PATH = "out/dataset"
