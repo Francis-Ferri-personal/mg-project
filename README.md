@@ -8,12 +8,13 @@ This project processes ocular signal data from patients to classify visits as `D
   - `01-dataset-generation.ipynb` - Notebook to generate the dataset and prepare the input JSONL files.
   - `02-statistics_test.ipynb` - Notebook for exploratory data analysis and feature validation.
   - `03-training.ipynb` - Training notebook that builds the dataset, creates folds, and trains the model.
-- `data/` - Raw data organized in folders by label and date.
 - `export/` - Generated outputs, including the processed dataset and `cv_config.json`.
-- `models/`
-  - `accession_dataset.py` - Custom PyTorch dataset that reads JSON files, extracts window-level features, and handles variable-length sequences.
-  - `lstm.py` - `OcularStatefulLSTM` model that processes temporal feature sequences with an LSTM.
-- `tools/` - Utility modules for loading data, statistics, and analysis.
+- mg_scripts/
+  - `mg_data/` - Raw data organized in folders by label and date.
+  - `mg_tools/` - Utility modules for loading data, statistics, and analysis.
+  - `mg_models/`
+    - `accession_dataset.py` - Custom PyTorch dataset that reads JSON files, extracts window-level features, and handles variable-length sequences.
+    - `lstm.py` - `OcularStatefulLSTM` model that processes temporal feature sequences with an LSTM.
 - `TODO.md` - List of pending tasks and improvements.
 
 ## Goal
@@ -53,18 +54,21 @@ Extract temporal features from ocular signal series at multiple frequencies and 
 ## Usage
 
 1. Activate the virtual environment:
-
 ```bash
 source .venv/bin/activate
 ```
 
-2. Open the training notebook:
+2. Install mg_scripts to the venv with 
+```bash
+pip install -e ./mg_scripts
+```
 
+3. Open the training notebook:
 ```bash
 jupyter notebook 03-training.ipynb
 ```
 
-3. Run the cells in order:
+4. Run the cells in order:
    - Define paths and parameters.
    - Generate cross-validation folds.
    - Execute `train_with_json_splits`.

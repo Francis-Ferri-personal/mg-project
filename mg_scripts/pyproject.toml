@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mg_scripts"
+version = "0.1"
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "torch",
+    "tqdm"
+]
+
+[tool.setuptools]
+packages = ["mg_dataset","mg_tools","mg_models"]
