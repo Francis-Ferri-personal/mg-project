@@ -1,9 +1,6 @@
 import json
 import os
 
-import sys
-sys.stdout.reconfigure(line_buffering=True)
-
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import multiprocessing
@@ -13,9 +10,14 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-from mg_dataset.dataset import MGDataset
-from mg_dataset.preprocesing import filters
-from mg_dataset.preprocesing import cycles
+try:
+    from mg_dataset.dataset import MGDataset
+    from mg_dataset.preprocesing import filters
+    from mg_dataset.preprocesing import cycles
+
+except ModuleNotFoundError: # probably fixes imports if venv is set up incorrectly
+    import sys
+    sys.path.append(os.path.join('mg_scripts','mg_dataset'))
 
 import mg_tools.stats as stats
 
@@ -118,7 +120,7 @@ def process_sample(sample_info: str, db_path: str) -> bool:
     # Each worker sets its own matplotlib backend
     import matplotlib
     matplotlib.use('agg')
-    
+
     import matplotlib.pyplot as plt
 
     import sys
@@ -147,6 +149,7 @@ def process_sample(sample_info: str, db_path: str) -> bool:
 
     worker_id = multiprocessing.current_process().ident
 
+    # can't get this to work
     cycle_iter = tqdm(
         enumerate(sample_cycles),
         total=len(sample_cycles),
@@ -205,8 +208,6 @@ def process_sample(sample_info: str, db_path: str) -> bool:
                 plt.close(fig)
             except Exception as e:
                 print(f"Raw render error for {sample_info}, cycle {cycle_idx}: {e}")
-                # Continue with other cycles? We'll skip this cycle's filtered part too.
-                continue
 
         # Render filtered
         if not has_filtered:
@@ -249,7 +250,7 @@ if __name__ == '__main__':
                 continue
 
             val_samples += [file[:-5]]
-        break
+        break # otherwise we'll just draw the entire thing lol
 
     val_samples_2 = []
 
@@ -270,6 +271,7 @@ if __name__ == '__main__':
 
     val_samples = val_samples_2
 
+    # parallelised thx to deepseek
     with ProcessPoolExecutor(max_workers=None) as executor:
         # Submit all tasks
         futures = {executor.submit(process_sample, sample, DEFAULT_DATABASE): sample
