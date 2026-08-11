@@ -16,31 +16,59 @@ def rate_of_change(
             + [(series[idx]-series[idx-1])/delta
                for idx in range(1, len(series))]
 
-def rolling_average(data:list|tuple, window_size=0) -> list:
-    """Smooths out data
+def rolling_average(series:list, kernel_size=0, method:str='mean') -> list:
+    if method == 'mean':
+        return mean_rolling_average(series, kernel_size)
+    if method == 'median':
+        return median_rolling_average(series, kernel_size)
+    else:
+        raise RuntimeError('rolling average \'method\' has to be \'mean\' or \'median\'')
+
+def mean_rolling_average(series:list|tuple, kernel_size=0) -> list:
+    """Smooths out series
 
     Args:
-        data ( iterable ) : value series
-        window_size (int, optional): how many samples to average. Defaults to 0.
+        series ( iterable ) : value series
+        kernel_size (int, optional): how many samples to average. Defaults to 0.
 
     Returns:
-        List: smoothed out data
+        List: smoothed out series
     """
-    if window_size < 2:
-        return data
+    if kernel_size < 2:
+        return series
     
-    if window_size % 2 == 0 :
-        window_size += 1
+    if kernel_size % 2 == 0 :
+        kernel_size += 1
     
-    half_window = window_size//2
-    data_end = len(data)
+    half_kernel = kernel_size//2
+    series_end = len(series)
     out = []
 
-    for i in range(len(data)):
-        start = max(0,i-half_window)
-        end = min(data_end,i+half_window)
-        out.append(sum(data[start:end])/window_size)
+    for i in range(len(series)):
+        start = max(0,i-half_kernel)
+        end = min(series_end,i+half_kernel)
+        local = series[start:end]
+        out.append(sum(local)/max(1, min(half_kernel, len(local)-1)))
     
+    return out
+
+def median_rolling_average(series:list|tuple, kernel_size=0):
+    if kernel_size<2:
+        return series
+
+    if kernel_size%2 == 0:
+        kernel_size += 1
+
+    half_kernel = kernel_size//2
+    series_end = len(series)
+    out = []
+
+    for i in range(len(series)):
+        start = max(0,i-half_kernel)
+        end = min(series_end, i+half_kernel)
+        local = sorted(series[start:end])
+        out.append( local[min(half_kernel, len(local)-1)] )
+
     return out
 
 def min_max_normalise(series:list) -> list:

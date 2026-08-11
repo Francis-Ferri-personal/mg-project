@@ -137,6 +137,7 @@ class RecordingVisualiser:
         list_of_cycles:list[dict[str,list[float]]],
         canvas_constructor=None,
         title : str = 'Whole Recording',
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         **canvas_kwargs
     ) -> plt.Figure:
         """Draws an entire recording's cycles. Pass in the recordings cycle as a list
@@ -172,13 +173,13 @@ class RecordingVisualiser:
 
         fig.suptitle(title)
         
-        for side_idx, side in enumerate(RECORDING_ANALYSIS_SIDES):
+        for side_idx, side in enumerate(channel_names):
             ax: plt.Axes = axs[side_idx]
             ax2 = ax.twinx()
 
             for cycle_idx, cycle in enumerate(list_of_cycles):
                 ax.plot(cycle['time_list'], cycle[side])
-                ax2.plot(cycle['time_list'],cycle['target_list'], 
+                ax2.plot(cycle['time_list'], cycle['target_list'], 
                             linewidth=1, alpha=0.6, linestyle=':', color=(0.4,0.04,0.54))
 
             ax.set_xbound(list_of_cycles[0]['time_list'][0],
@@ -199,6 +200,7 @@ class RecordingVisualiser:
         self, 
         canvas_constructor=None, 
         title:str=None, 
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         **canvas_kwargs
     )-> plt.Figure:
         
@@ -207,7 +209,9 @@ class RecordingVisualiser:
 
         return self.draw_whole_recording_of(
             self.list_of_cycles, canvas_constructor, 
-            title=title, **canvas_kwargs
+            title=title, 
+            channel_names=channel_names,
+            **canvas_kwargs
         )
 
 
@@ -217,6 +221,7 @@ class RecordingVisualiser:
         canvas_constructor=None,
         stats_display_options:dict[str,dict[str,]] = STATS_DISPLAY_DEFAULT,
         title : str = 'Stats Over Cycles',
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         **canvas_kwargs
     ) -> plt.Figure:
         """Draws the statistics of each cycle, pass in the list of cycle statistics and the options to display
@@ -261,7 +266,7 @@ class RecordingVisualiser:
         stats_display_dict = {}
 
         for cycle in list_of_cycles_stats:
-            for side in RECORDING_ANALYSIS_SIDES:
+            for side in channel_names:
                 cycle_side : dict[str,dict] = cycle[side]
 
                 for key in stats_display_options:
@@ -309,6 +314,7 @@ class RecordingVisualiser:
         stats_display_options: dict[str,dict[str,]] = STATS_DISPLAY_DEFAULT,
         list_of_cycles_stats : list[dict[str,]] = None, 
         title:str = None, 
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         **canvas_kwargs
     ) -> plt.Figure:
         
@@ -325,6 +331,7 @@ class RecordingVisualiser:
             canvas_constructor,
             stats_display_options, 
             title=title,
+            channel_names=channel_names
             **canvas_kwargs
         )
 
@@ -333,7 +340,8 @@ class RecordingVisualiser:
         cycle_dict: dict[str,list[float]],
         canvas_constructor=None,
         representative_cycle: dict[str,list[float]]=None,
-        title : str = 'Stats Over Cycles',
+        title : str = 'Single Cycle',
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         value_y_bounds: tuple = (-24.2,24.2),
         value_y_step: float = 5,
         **canvas_kwargs
@@ -372,7 +380,7 @@ class RecordingVisualiser:
             ax2.set_ybound(-24.2,24.2)
             ax2.set_ylabel('Degrees (Ideal)')
 
-        for side in RECORDING_ANALYSIS_SIDES:
+        for side in channel_names:
             ax.plot(cycle_dict[side], label=side)
 
             if representative_cycle is not None:
@@ -395,7 +403,8 @@ class RecordingVisualiser:
         if value_y_bounds is not None:
             ax.set_ybound(*value_y_bounds)
 
-        ax.set_xbound(-1,len(cycle_dict['AVG']))
+        use_x_len = list(cycle_dict.keys())[0]
+        ax.set_xbound(-1, len(cycle_dict[use_x_len]))
 
         ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
         ax.xaxis.set_minor_locator(ticker.MultipleLocator(1))
@@ -417,6 +426,7 @@ class RecordingVisualiser:
         canvas_constructor=None, 
         representative_cycle:dict[str,list[float]] = None, 
         title:str=None, 
+        channel_names : tuple[str] = RECORDING_ANALYSIS_SIDES,
         **canvas_kwargs
     ) -> plt.Figure:
         
@@ -434,5 +444,6 @@ class RecordingVisualiser:
             canvas_constructor,
             representative_cycle, 
             title=title,  
+            channel_names = channel_names,
             **canvas_kwargs
         )

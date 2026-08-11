@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 
-
 FREQ_MAP = {
     "0.5": "freq_0.5",
     "0.75": "freq_0.75",
@@ -130,28 +129,52 @@ class MGDataset:
             break
 
         if access_level > 0:
-            this_group = self.by_group[group_name]
+            this_group = self.patients(group_name)
             max_patients = len(this_group)
             if patient >= max_patients:
                 raise IndexError(f"{group_name} has maximum patient index {max_patients-1}")
-            as_dict['patient'] = (patient_name := list(this_group.keys())[patient])
+            as_dict['patient'] = (patient_name := this_group[patient])
 
         if access_level > 1:
-            this_patient = this_group[patient_name]
+            this_patient = self.visits(group_name, patient_name)
             max_dates = len(this_patient)
             if date >= max_dates:
                 raise IndexError(f"{group_name} | {patient_name} has maximum visit index {max_dates-1}")
-            as_dict['date'] = list(this_patient.keys())[date]
+            as_dict['date'] = this_patient[date]
 
         return {k:v for k,v in as_dict.items()
                 if not remove_nones and True or v is not None}
 
     def get_files(self, 
-                  group: str, 
-                  patient: str, 
-                  date: str = None,
-                  axis: str = None,
+                  group: str | int, 
+                  patient: str | int, 
+                  date: str |int = None,
+                  axis: str |int = None,
                   frequency: str = None) -> list[dict] | dict:
+        """Fetches file info(s).
+        Exact string and integer indices are interchangable. 
+        Fetching is ordered:
+            group -> patient -> date -> axis -> frequency
+        if a lower order is given but not a higher order, it will return
+        down to the lowest consecutive ordering.
+
+        Examples:
+            get_files('Healthy control', 0) # returns all files in all visits of the patient
+            get_files('Healthy control', 0, 0) # returns all files in the first visit of the patient
+            get_files('Healthy control', date=0) # returns empty list because patient is not given
+            get_files(0, patient=0, date=0, frequency=0) # returns all files in the same visit date
+            get_files(0,0,0,0,0) # returns a single dictionary info
+
+        Args:
+            group (str | int): The pathology group name or index, check self.by_group for integer index.
+            patient (str | int): The patient name or index.
+            date (str | int, optional): Which visit date to fetch. Defaults to None.
+            axis (str | int, optional):' 'horizontal' or 'vertical'. Defaults to None.
+            frequency (str, optional): 'freq_' + 0.5, 0.75, or 1.0. Defaults to None.
+
+        Returns:
+            list[dict] | dict: List of file infos or just one file info
+        """
 
         as_dict = {k:v for k,v in locals().items() 
                    if k in ('group','patient','date','axis','frequency')}
@@ -217,7 +240,10 @@ class MGDataset:
         if isinstance(key, slice):
             raise TypeError("key cannot be slice!")
         
-        file_info = self.__getitem__(key)
+        file_info = self[key]
+        if not isinstance(file_info, dict):
+            raise TypeError("csv key must fetch a single file_info! see self.get_files")
+        
         return self.load_csv_of(file_info)
 
     def __get_by_index(self, key):
@@ -226,6 +252,12 @@ class MGDataset:
     def __getitem__(self, key):
         if isinstance(key, int):
             return self.__get_by_index(key)
+
+        if isinstance(key, (tuple, list)):
+            order = ('group','patient','date','axis','frequency')
+            if len(key) < 5:
+                raise IndexError("tuple key must be 5 items long for accession!")
+            key = {k:v for k,v in zip(order,key)}
 
         if isinstance(key, dict):
             try:
@@ -240,38 +272,41 @@ class MGDataset:
             if isinstance(start, dict) and isinstance(stop, dict):
                 return 
 
+        if isinstance(key, (tuple, list)):
+            order = ('group','patient,')
+
     def __len__(self):
         return len(self._files)
 
 if __name__ == "__main__":
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     dataset_dir = os.path.dirname(__file__)
 
+    import sys
+
     import matplotlib.pyplot as plt
-    from mg_scripts.mg_tools.visualize import visualize_raw, visualize_cycles, plot_cycles, plot_cycles_comparison
-    from .preprocesing.filters import denoise
-    from .preprocesing.cycles import get_cycles
+    from mg_tools.visualize import visualize_raw, visualize_cycles, plot_cycles, plot_cycles_comparison
+    from mg_dataset.preprocesing.filters import denoise
+    from mg_dataset.preprocesing.cycles import get_cycles
 
-    id_num = 15
-
-    ds = MGDataset()
+    ds = MGDataset('Database/mg-data/')
     print(f"Groups: {ds.groups}")
-    print(f"Patients in 'Definite MG': {len(ds.patients('Definite MG'))}")
 
-    patient = ds.patients('Definite MG')[id_num]
+    test_group, test_patient, test_visit = 'Definite MG', 15, 0
+    print(f"Patients in '{test_group}': {len(ds.patients(test_group))}")
+
+    patient = ds.patients(test_group)[test_patient]
     print(f"First patient: {patient}")
 
-    visits = ds.visits('Definite MG', patient)
+    visits = ds.visits(test_group, patient)
     print(f"Visits: {visits}")
 
-    files = ds.get_files('Definite MG', patient, visits[0])
+    files = ds.get_files(test_group, test_patient, test_visit)
     print(f"Files in first visit: {len(files)}")
     
     for f in files:
         print(f"  {f['axis']} {f['frequency']}: {os.path.basename(f['path'])}")
 
-    sample = ds.load_csv(files[0])
+    sample = ds.load_csv((test_group,test_patient,test_visit,0,0))
     cycles = get_cycles(sample["Target"])
 
     # ---- test distintos kernels ----
@@ -302,7 +337,10 @@ if __name__ == "__main__":
         axes[idx + 1].legend(ncols=3, fontsize=8)
         axes[idx + 1].grid(True, alpha=0.3)
 
-    plt.savefig(os.path.join(dataset_dir, f"kernel_comparison_{id_num}.png"))
+    os.makedirs(os.path.join(dataset_dir,'figures'),exist_ok=True)
+    figure_path = os.path.join(dataset_dir,'figures')
+
+    plt.savefig(os.path.join(figure_path, f"kernel_comparison_{test_patient}.png"))
 
     # ---- guardar con kernel=7 (default) ----
     filtered = {
@@ -313,7 +351,11 @@ if __name__ == "__main__":
         "meta": sample["meta"],
     }
 
-    figs = plot_cycles_comparison(sample, filtered, cycles, str(id_num))
+    figs = plot_cycles_comparison(
+        sample, filtered, cycles, str(test_patient),figure_path
+    )
     for fig in figs:
         plt.close(fig)
+
+    print(f'Figures saved in {figure_path}/')
     
