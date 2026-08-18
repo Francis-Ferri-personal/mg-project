@@ -1,7 +1,7 @@
 __pycache__
 out
 .venv
-data
+data/raw
 *.zip
 
 **/.DS_Store
@@ -14,3 +14,6 @@ __pycache__/
 exports/
 
 */test.ipynb
+.env
+
+.opencode

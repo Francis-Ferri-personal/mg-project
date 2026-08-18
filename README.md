@@ -1,98 +1,137 @@
 # Myasthenia Gravis Ocular Signal Classification
 
-This project processes ocular signal data from patients to classify visits as `Definite MG` or `Healthy control` using frequency-based windows and an LSTM model.
+This project processes ocular signal data from patients to classify visits as `Definite MG` or `Healthy control`. Raw saccade recordings (position) are turned into kinematic feature sequences (velocity, speed, gain for left/right/average at each drive frequency) and fed to a recurrent model (GRU, with an LSTM variant available).
+
+All Python runs with **CWD = repo root** (imports are `dataset.*`, `models.*`, `tools.*`; paths are relative like `data/raw`, `out/dataset`).
 
 ## Repository structure
 
-- notebooks/
-  - `01-dataset-generation.ipynb` - Notebook to generate the dataset and prepare the input JSONL files.
-  - `02-statistics_test.ipynb` - Notebook for exploratory data analysis and feature validation.
-  - `03-training.ipynb` - Training notebook that builds the dataset, creates folds, and trains the model.
-- `export/` - Generated outputs, including the processed dataset and `cv_config.json`.
-- mg_scripts/
-  - `mg_data/` - Raw data organized in folders by label and date.
-  - `mg_tools/` - Utility modules for loading data, statistics, and analysis.
-  - `mg_models/`
-    - `accession_dataset.py` - Custom PyTorch dataset that reads JSON files, extracts window-level features, and handles variable-length sequences.
-    - `lstm.py` - `OcularStatefulLSTM` model that processes temporal feature sequences with an LSTM.
-- `TODO.md` - List of pending tasks and improvements.
+- `datasets/`
+  - `dataset.py` — `MGDataset`: indexes and loads the raw CSVs from `data/raw` (utf-16-le). This is the raw-data reader.
+  - `preprocesing/` — `filters.py` (`denoise`, `median_filter`, `remove_spikes`, `clamp`) and `cycles.py` (`get_cycles`). Note the dir is spelled `preprocesing`; do not rename it.
+  - `explore.py` — Interactive exploration script for analyzing individual patient data with kernel comparisons.
+- `models/`
+  - `accession_dataset.py` — `AccessionDataset` + `ocular_collate_fn`: reads the generated JSON, extracts window-level features, handles variable-length sequences.
+  - `gru.py` — `OcularStatefulGRU` (used by `train_gru.py`).
+  - `lstm.py` — `OcularStatefulLSTM` (legacy/alternative model).
+- `tools/` — analysis utilities: `accession.py` (per-visit kinematics: velocity/gain/speed/acceleration), `accessions_db.py`, `data_loader.py`, `stats.py`, `recording_analysis.py`, `recording_visualisers.py`, `visualize.py`, `jsonl_util.py`.
+- `notebooks/`
+  - `01-dataset_generation.ipynb` — generates the dataset from raw (entrypoint for step 1 below).
+  - `02-statistics_test.ipynb`, `01a - dataset_with_dataset.ipynb` — exploratory data analysis / filtering.
+  - `03-training.ipynb` — training notebook (preferred to use `train_gru.py`).
+- `data/raw/{Definite MG, Healthy control}/<YYYY-MM-DD <patient name>>/*.csv` — raw recordings (utf-16-le, spaces + Korean characters in paths — always quote).
+- `out/dataset/<label>/<NN-NN>.json` — generated per-patient dataset (what training reads). `out/cv_config.json` — cross-validation folds. `out/explore/` — exploration output.
+- `train_gru.py` — training entrypoint. `draw_validation.py` — plots validation folds. `notification.py` — signed webhook (reads a gitignored `.env`; never commit it).
+- `TODO.md` — pending tasks.
+- `pyproject.toml` — Python project configuration with dependencies (managed by `uv`).
 
-## Goal
+## Workflow (in order)
 
-Extract temporal features from ocular signal series at multiple frequencies and train a binary classifier.
+Run everything from the repo root inside the venv.
 
-### Feature extraction summary
+**Setup with `uv`:**
 
-- Each frequency is divided into fixed-size windows.
-- Each window is split into two halves.
-- For each half we extract:
-  - maximum value
-  - minimum value
-  - index of the maximum
-  - index of the minimum
-- This produces 8 features per window.
-- Using all three frequencies (`freq_0.5`, `freq_0.75`, `freq_1.0`) yields a 24-feature time step.
-
-## Data pipeline
-
-1. The dataset loads JSON files from `out/dataset`.
-2. Each file is processed for each available `visit` entry.
-3. Window sequences are extracted for each configured frequency.
-4. Missing frequency windows are padded with zeros to normalize sequence length.
-5. Batches are created with `ocular_collate_fn`, producing:
-   - `sequences` shaped `(batch, max_steps, features)`
-   - `labels`
-   - `masks` for variable-length sequences
-
-## Model
-
-- `OcularStatefulLSTM` uses a PyTorch LSTM with `batch_first=True`.
-- It packs padded sequences with `pack_padded_sequence` to handle variable lengths.
-- The model selects the last valid output from each sequence for classification.
-- The final classifier is a linear layer over the hidden output.
-
-## Usage
-
-1. Activate the virtual environment:
 ```bash
+# Install dependencies and create virtual environment
+uv sync
+
+# Run commands using uv (automatically activates venv)
+uv run python datasets/explore.py --patient 0
+uv run python train_gru.py
+```
+
+Or activate the venv manually and run directly:
+
+```bash
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python datasets/explore.py --patient 0
+```
+
+### 1. Generate the dataset from raw
+
+The raw CSVs are read by `dataset/dataset.py` (`MGDataset`), and per-visit kinematics (velocity / speed / gain for L/R/AVG at each frequency) are produced by `tools/accession.py` (`Accession.analyse(...)`) via the generation notebook `notebooks/01-dataset_generation.ipynb`. The result is one JSON per patient under `out/dataset/<label>/`:
+
+```
+out/dataset/<label>/<NN-NN>.json
+  └─ visits -> { freq_0.5, freq_0.75, freq_1.0 } ->
+       { velocity_horizontalLH, velocity_horizontalRH, velocity_horizontalAVG,
+         speed_horizontalLH, ..., gain_verticalLV, gain_verticalRV, gain_verticalAVG }
+```
+
+Smoke-test the raw reader (indexing, CSV loading, cycle detection, filtering, and figure rendering):
+
+```bash
+python -m dataset.dataset   # run from repo root
+```
+
+> Note: the committed generation notebooks still reference the old `exports/` tree. Point their output paths at `out/dataset` (and input at `data/raw`) before running them against the current directory layout.
+
+### 1.5 Explore individual patient data
+
+Use `datasets/explore.py` to analyze a single patient's visit with kernel comparison plots and cycle analysis:
+
+```bash
+# With uv (recommended)
+uv run python datasets/explore.py --patient 0 --group "Definite MG" --visit 0
+
+# Or activate venv and run directly
 source .venv/bin/activate
+python datasets/explore.py --patient 0 --group "Definite MG" --visit 0
 ```
 
-2. Install mg_scripts to the venv with 
+**Flags:**
+- `--patient` — patient index (default: 0)
+- `--group` — group name (default: "Definite MG")
+- `--visit` — visit index (default: 0)
+
+Output is saved to `out/explore/`.
+
+### 2. Train
+
+`train_gru.py` builds/reuses `out/cv_config.json` (5 stratified folds, seed 42) and trains `OcularStatefulGRU`:
+
 ```bash
-pip install -e ./mg_scripts
+python train_gru.py         # defaults: epochs=15, batch_size=8
 ```
 
-3. Open the training notebook:
-```bash
-jupyter notebook 03-training.ipynb
-```
+Delete `out/cv_config.json` to regenerate the folds. `notebooks/03-training.ipynb` is the interactive equivalent.
 
-4. Run the cells in order:
-   - Define paths and parameters.
-   - Generate cross-validation folds.
-   - Execute `train_with_json_splits`.
+> Note: if you do not yet have a `cv_config.json`, or want to regenerate it, run the dedicated tool:
+>
+> ```bash
+> uv run python tools/datasets/cross_validation.py
+> ```
+>
+> It lists the samples under `data/raw` (or whatever `DATASET_PATH` is set to inside the script), shuffles with seed 42, and writes 5 stratified folds to `results_dir/cv_config.json` (`results_dir` is `data/dataset` by default inside that script). Confirm that the script's `RESULTS_DIR` matches where your training pipeline reads the config from.
+
+## Feature extraction summary
+
+- Each frequency series is divided into fixed-size windows (window size = `240 Hz / frequency`: 480 for 0.5 Hz, 360 for 0.75 Hz, 240 for 1.0 Hz).
+- Each window is split into two halves; for each half we extract max, min, index-of-max, index-of-min (8 features).
+- Using all three frequencies (`freq_0.5`, `freq_0.75`, `freq_1.0`) yields a 24-feature time step (8 × 3).
+
+## Data pipeline (model input)
+
+1. `AccessionDataset` loads the generated JSON files from `out/dataset`.
+2. Each file is processed per `visit`.
+3. Window-feature sequences are extracted per configured frequency; shorter sequences are zero-padded per step to align to the longest.
+4. Batches are formed with `ocular_collate_fn`, producing `sequences` `(batch, max_steps, features)`, `labels`, and `masks`.
+5. The model reads the **last valid** step per sequence (padding is handled by the masks), then a linear layer classifies.
 
 ## Training configuration
 
-- `DATASET_PATH` should point to `out/dataset`.
-- `RESULTS_DIR` should point to `out`.
-- The notebook creates `cv_config.json` with cross-validation folds.
-- The default training settings use `batch_size=8` and `epochs=15`.
+- `DATASET_PATH` = `out/dataset`; `RESULTS_DIR` = `out`; folds in `out/cv_config.json`.
+- Label is inferred from the file path substring: `"Healthy control"` → 0, `"Definite MG"` → 1 (`train_gru.resolve_paths` falls back `Probable MG` → `Definite MG`).
+- `AccessionDataset` default feature key is `speed_horizontalAVG`; `frequency_key='all'` gives the 24-feature step.
+- Device: CUDA if available, else CPU.
 
 ## Debug notes
 
-- If you see a shape error in the model, ensure the dataset returns 24-feature time steps when all three frequencies are used.
-- If some visits are missing frequencies, the dataset pads with zeros to preserve the expected shape.
-- If an outdated module version is loaded in Jupyter, restart the kernel and rerun all cells.
-
-## Potential improvements
-
-- Normalize features per window or across the dataset.
-- Visualize window extraction with plots.
-- Add a `requirements.txt` file with required packages.
-- Add explicit missing-data validation and clearer reporting.
+- If you see a shape error, ensure the dataset returns 24-feature steps when all three frequencies are used.
+- Missing frequencies are padded with zeros to preserve shape.
+- After editing anything in `dataset/`, `models/`, or `tools/`, restart Jupyter kernels and rerun all cells.
+- `main.py` is a placeholder (`Hello from mg!`), not an entrypoint.
 
 ## Notes
 
-This README documents the project structure and main components of the MG classification pipeline built on ocular signal features.
+`data/` and `out/` are gitignored and not in git — the raw data and generated dataset must be present before training. The `.env` used by `notification.py` (webhook secret) is gitignored and must never be committed.
