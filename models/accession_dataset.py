@@ -4,6 +4,59 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
+
+class FeatureNormalizer:
+    """
+    Per-feature z-score normalizer.
+
+    Fit on train timesteps only, then apply the same mean/std to train and val.
+    Near-zero variance features keep std=1 to avoid divide-by-zero.
+    """
+
+    def __init__(self, eps: float = 1e-6):
+        self.eps = eps
+        self.mean: torch.Tensor | None = None
+        self.std: torch.Tensor | None = None
+
+    @property
+    def is_fitted(self) -> bool:
+        return self.mean is not None and self.std is not None
+
+    def fit(self, dataset: "AccessionDataset") -> "FeatureNormalizer":
+        if len(dataset) == 0:
+            raise ValueError("Cannot fit FeatureNormalizer on an empty dataset")
+
+        # Temporarily clear so fit sees raw features
+        prev = dataset.normalizer
+        dataset.normalizer = None
+        try:
+            rows = [dataset[i][0] for i in range(len(dataset))]
+        finally:
+            dataset.normalizer = prev
+
+        x = torch.cat(rows, dim=0).float()
+        self.mean = x.mean(dim=0)
+        std = x.std(dim=0, unbiased=False)
+        self.std = torch.where(std < self.eps, torch.ones_like(std), std)
+        return self
+
+    def transform(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.is_fitted:
+            raise RuntimeError("FeatureNormalizer must be fit() before transform()")
+        mean = self.mean.to(dtype=x.dtype, device=x.device)
+        std = self.std.to(dtype=x.dtype, device=x.device)
+        return (x - mean) / std
+
+    def state_dict(self) -> dict:
+        return {"mean": self.mean, "std": self.std, "eps": self.eps}
+
+    def load_state_dict(self, state: dict) -> "FeatureNormalizer":
+        self.mean = state["mean"]
+        self.std = state["std"]
+        self.eps = float(state.get("eps", self.eps))
+        return self
+
+
 class AccessionDataset(Dataset):
     """
     Dataset for Myasthenia Gravis (MG) binary classification using extracted features.
@@ -37,10 +90,18 @@ class AccessionDataset(Dataset):
         'freq_1.0': 240,
     }
 
-    def __init__(self, file_paths, window_size=240, frequency_key='freq_1.0', feature_key="speed_horizontalAVG"):
+    def __init__(
+        self,
+        file_paths,
+        window_size=240,
+        frequency_key='freq_1.0',
+        feature_key="speed_horizontalAVG",
+        normalizer: FeatureNormalizer | None = None,
+    ):
         self.file_paths = file_paths
         self.window_size = window_size
         self.feature_key = feature_key
+        self.normalizer = normalizer
 
         if frequency_key == 'all':
             self.frequency_keys = self.DEFAULT_FREQUENCIES.copy()
@@ -57,7 +118,6 @@ class AccessionDataset(Dataset):
             'Definite MG': 1
         }
         self.samples = self._index_files()
-
     def _index_files(self):
         samples = []
         for path in self.file_paths:
@@ -194,6 +254,11 @@ class AccessionDataset(Dataset):
 
         return combined if combined else [[0.0] * (2 * len(self.frequency_keys) * self.FEATURES_PER_AXIS_FREQUENCY)]
 
+    def _maybe_normalize(self, feature_sequence: torch.Tensor) -> torch.Tensor:
+        if self.normalizer is not None and self.normalizer.is_fitted:
+            return self.normalizer.transform(feature_sequence)
+        return feature_sequence
+
     def __getitem__(self, idx):
         sample_info = self.samples[idx]
         path = sample_info['path']
@@ -211,7 +276,7 @@ class AccessionDataset(Dataset):
 
         num_features = 2 * len(self.frequency_keys) * self.FEATURES_PER_AXIS_FREQUENCY
         if data is None:
-            return torch.zeros((1, num_features), dtype=torch.float32), torch.tensor(label)
+            return self._maybe_normalize(torch.zeros((1, num_features), dtype=torch.float32)), torch.tensor(label)
 
         try:
             if 'axes' in data:
@@ -222,7 +287,7 @@ class AccessionDataset(Dataset):
                 if feature_sequence.shape[1] < num_features:
                     pad = torch.zeros((feature_sequence.shape[0], num_features - feature_sequence.shape[1]), dtype=torch.float32)
                     feature_sequence = torch.cat([feature_sequence, pad], dim=1)
-                return feature_sequence, torch.tensor(label)
+                return self._maybe_normalize(feature_sequence), torch.tensor(label)
 
             visit_data = data['visits'][visit_id]
             freq_sequences = []
@@ -253,11 +318,11 @@ class AccessionDataset(Dataset):
                 sequence = [[0.0] * num_features]
 
             feature_sequence = torch.tensor(sequence, dtype=torch.float32)
-            return feature_sequence, torch.tensor(label)
+            return self._maybe_normalize(feature_sequence), torch.tensor(label)
 
         except Exception as e:
             print(f"Error processing sample from {path}: {e}")
-            return torch.zeros((1, num_features), dtype=torch.float32), torch.tensor(label)
+            return self._maybe_normalize(torch.zeros((1, num_features), dtype=torch.float32)), torch.tensor(label)
 
 
 def ocular_collate_fn(batch):
