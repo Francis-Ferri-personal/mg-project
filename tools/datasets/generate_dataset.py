@@ -31,7 +31,7 @@ SIDES = ('L', 'R')
 # Modify these values directly in code or use the --denoise CLI flag to enable.
 # ==============================================================================
 FILTER_CONFIG = {
-    "enabled": False,         # Set to True to apply denoise filter by default
+    "enabled": True,          # Set to True to apply denoise filter by default
     "kernel": 7,              # Median filter & spike removal kernel size
     "passes": 3,              # Spike removal passes (thresholds 5.0, 4.0, 3.0)
     "clamp_lo": -25.0,        # Lower clamp bound

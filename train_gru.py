@@ -171,7 +171,7 @@ def run_epoch(model, loader, optimizer, criterion, device, is_train=True):
     return total_loss / total, 100 * correct / total
 
 
-def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=15, batch_size=8, out_dir=None):
+def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_size=8, out_dir=None):
     if out_dir is None:
         out_dir = os.path.join("out", "training_results")
     os.makedirs(out_dir, exist_ok=True)
@@ -285,5 +285,5 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=15, batch_
 
 if __name__ == "__main__":
     ensure_cv_config(DATASET_PATH, RESULTS_DIR, n_folds=5, seed=42)
-    train_with_json_splits(SPLITS_JSON, DATASET_PATH, epochs=15, batch_size=8)
+    train_with_json_splits(SPLITS_JSON, DATASET_PATH, batch_size=8)
 
