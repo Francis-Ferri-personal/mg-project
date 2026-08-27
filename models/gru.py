@@ -10,7 +10,7 @@ class OcularStatefulGRU(nn.Module):
     This follows the same flow as the existing LSTM model, accepting
     padded sequences and an optional mask for variable-length sequences.
     """
-    def __init__(self, input_size=324, hidden_size=32, num_layers=2, num_classes=2, dropout=0.5):
+    def __init__(self, input_size=324, hidden_size=16, num_layers=1, num_classes=2, dropout=0.5):
         super(OcularStatefulGRU, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
