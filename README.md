@@ -67,6 +67,20 @@ Smoke-test the raw reader (indexing, CSV loading, cycle detection, filtering, an
 python -m dataset.dataset   # run from repo root
 ```
 
+### Format the dataset (required before training)
+
+The previous step only writes a single flat JSONL (`data/dataset/dataset.jsonl`). Training does **not** read that file directly — `AccessionDataset` expects the grouped-per-patient layout `out/dataset/<label>/<file>.json`. You must format the JSONL into that layout:
+
+```bash
+uv run python datasets/format_dataset.py --input data/dataset/dataset.jsonl --output out/dataset
+```
+
+**Flags:**
+- `--input` — the JSONL produced in step 1 (default: `data/dataset/dataset.jsonl`)
+- `--output` — destination folder for the grouped JSONs (default: `data/dataset/formatted`). **Override this to `out/dataset`**, otherwise training (`DATASET_PATH = out/dataset`) will fail with a "missing label folders" error.
+
+This writes one JSON per patient visit under `out/dataset/{Definite MG, Healthy control}/` plus a `manifest.json`. Skip this step and `train_gru.py` will abort at `ensure_cv_config` because `out/dataset` has no `Definite MG` / `Healthy control` folders.
+
 ### 1.5 Explore individual patient data
 
 Use `datasets/explore.py` to analyze a single patient's visit with kernel comparison plots and cycle analysis:
