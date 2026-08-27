@@ -243,7 +243,7 @@ def train_with_json_splits(
 
         model = OcularStatefulGRU(input_size=num_features, num_classes=2).to(device)
         criterion = nn.CrossEntropyLoss()
-        optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+        optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
 
         best_val_acc = 0.0
         fold_history = []
