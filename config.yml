@@ -1,0 +1,4 @@
+clamp_factor: 3.0
+
+# low_state_pct_thresh: 35
+# high_state_pct_thresh: 65

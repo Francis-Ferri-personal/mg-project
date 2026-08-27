@@ -9,11 +9,15 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 
-from mg_scripts.mg_models.accession_dataset import AccessionDataset, ocular_collate_fn
-from mg_scripts.mg_models.gru import OcularStatefulGRU
+from models.accession_dataset import AccessionDataset, ocular_collate_fn
+from models.gru import OcularStatefulGRU
 
 SELECTED_FREQUENCY = "1.0"
-DATASET_PATH = "out/dataset"
+DEFAULT_DATASET_CANDIDATES = [
+    os.path.join("data", "dataset", "formatted"),
+    os.path.join("out", "dataset"),
+]
+DATASET_PATH = next((p for p in DEFAULT_DATASET_CANDIDATES if os.path.isdir(p)), "out/dataset")
 RESULTS_DIR = "out"
 SPLITS_JSON = os.path.join(RESULTS_DIR, "cv_config.json")
 
@@ -28,14 +32,50 @@ window_size = FREQUENCIES_WINDOWS[SELECTED_FREQUENCY]
 
 def ensure_cv_config(dataset_path, results_dir, n_folds=5, seed=42):
     os.makedirs(results_dir, exist_ok=True)
+    config_path = os.path.join(results_dir, "cv_config.json")
 
-    if os.path.exists(SPLITS_JSON):
-        print(f"Using existing cross-validation config: {SPLITS_JSON}")
-        with open(SPLITS_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
+    label_dirs = [
+        os.path.join(dataset_path, "Definite MG"),
+        os.path.join(dataset_path, "Healthy control"),
+    ]
+    if not all(os.path.isdir(d) for d in label_dirs):
+        raise FileNotFoundError(
+            f"Dataset directory {dataset_path} is missing label folders: "
+            + ", ".join(os.path.basename(d) for d in label_dirs)
+        )
 
-    mg_samples = sorted(os.listdir(os.path.join(dataset_path, "Definite MG")))
-    healthy_samples = sorted(os.listdir(os.path.join(dataset_path, "Healthy control")))
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if (
+                existing.get("dataset_path") == dataset_path
+                and existing.get("n_folds") == n_folds
+                and existing.get("seed") == seed
+                and isinstance(existing.get("folds"), list)
+                and len(existing["folds"]) > 0
+            ):
+                print(f"Using existing cross-validation config: {config_path}")
+                return existing
+        except Exception:
+            pass
+
+        print(f"Discarding stale cross-validation config: {config_path}")
+
+    mg_samples = sorted(
+        name for name in os.listdir(os.path.join(dataset_path, "Definite MG"))
+        if name.lower().endswith(".json")
+    )
+    healthy_samples = sorted(
+        name for name in os.listdir(os.path.join(dataset_path, "Healthy control"))
+        if name.lower().endswith(".json")
+    )
+
+    if len(mg_samples) == 0 or len(healthy_samples) == 0:
+        raise ValueError(
+            f"Dataset {dataset_path} has no JSON samples for one of the classes. "
+            f"MG={len(mg_samples)}, Healthy={len(healthy_samples)}"
+        )
 
     random.seed(seed)
     healthy_shuffled = healthy_samples.copy()
@@ -64,10 +104,10 @@ def ensure_cv_config(dataset_path, results_dir, n_folds=5, seed=42):
         "folds": folds,
     }
 
-    with open(SPLITS_JSON, "w", encoding="utf-8") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
-    print(f"Saved new cross-validation config to {SPLITS_JSON}")
+    print(f"Saved new cross-validation config to {config_path}")
     return config
 
 
@@ -75,7 +115,13 @@ def resolve_paths(base_dataset_dir, split_section):
     paths = []
 
     for f_name in split_section.get("healthy", []):
-        paths.append(os.path.join(base_dataset_dir, "Healthy control", f_name))
+        candidate = os.path.join(base_dataset_dir, "Healthy control", f_name)
+        if os.path.exists(candidate):
+            paths.append(candidate)
+        else:
+            alt = os.path.join(base_dataset_dir, "healthy", f_name)
+            if os.path.exists(alt):
+                paths.append(alt)
 
     for f_name in split_section.get("mg", []):
         definite_path = os.path.join(base_dataset_dir, "Definite MG", f_name)
@@ -85,7 +131,9 @@ def resolve_paths(base_dataset_dir, split_section):
         elif os.path.exists(probable_path):
             paths.append(probable_path)
         else:
-            paths.append(os.path.join(base_dataset_dir, f_name))
+            legacy_path = os.path.join(base_dataset_dir, f_name)
+            if os.path.exists(legacy_path):
+                paths.append(legacy_path)
 
     return paths
 
@@ -147,7 +195,7 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=15, batch_
         train_dataset = AccessionDataset(train_paths, window_size=window_size, frequency_key="all")
         val_dataset = AccessionDataset(val_paths, window_size=window_size, frequency_key="all")
 
-        num_features = train_dataset[0][0].shape[1] if len(train_dataset) > 0 else 24
+        num_features = train_dataset[0][0].shape[1] if len(train_dataset) > 0 else 324
         print(f"Model input feature size: {num_features}")
 
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=ocular_collate_fn)

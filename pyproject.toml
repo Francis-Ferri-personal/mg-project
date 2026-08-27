@@ -3,9 +3,11 @@ name = "mg"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
+    "matplotlib>=3.11.1",
     "pandas>=3.0.5",
+    "pyyaml>=6.0.3",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
     "tqdm>=4.69.0",

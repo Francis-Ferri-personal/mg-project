@@ -14,7 +14,7 @@ All Python runs with **CWD = repo root** (imports are `dataset.*`, `models.*`, `
   - `accession_dataset.py` — `AccessionDataset` + `ocular_collate_fn`: reads the generated JSON, extracts window-level features, handles variable-length sequences.
   - `gru.py` — `OcularStatefulGRU` (used by `train_gru.py`).
   - `lstm.py` — `OcularStatefulLSTM` (legacy/alternative model).
-- `tools/` — analysis utilities: `accession.py` (per-visit kinematics: velocity/gain/speed/acceleration), `accessions_db.py`, `data_loader.py`, `stats.py`, `recording_analysis.py`, `recording_visualisers.py`, `visualize.py`, `jsonl_util.py`.
+- `tools/` — analysis and dataset utilities: `datasets/generate_dataset.py` (CLI dataset generator script), `accession.py` (per-visit kinematics), `accessions_db.py`, `data_loader.py`, `stats.py`, `recording_analysis.py`, `recording_visualisers.py`, `visualize.py`, `jsonl_util.py`.
 - `notebooks/`
   - `01-dataset_generation.ipynb` — generates the dataset from raw (entrypoint for step 1 below).
   - `02-statistics_test.ipynb`, `01a - dataset_with_dataset.ipynb` — exploratory data analysis / filtering.
@@ -49,22 +49,23 @@ python datasets/explore.py --patient 0
 
 ### 1. Generate the dataset from raw
 
-The raw CSVs are read by `dataset/dataset.py` (`MGDataset`), and per-visit kinematics (velocity / speed / gain for L/R/AVG at each frequency) are produced by `tools/accession.py` (`Accession.analyse(...)`) via the generation notebook `notebooks/01-dataset_generation.ipynb`. The result is one JSON per patient under `out/dataset/<label>/`:
+You can generate the profile dataset JSONL directly using the standalone CLI script [`tools/datasets/generate_dataset.py`](file:///workspace/MG/tools/datasets/generate_dataset.py):
 
+```bash
+uv run python tools/datasets/generate_dataset.py --raw-dir data/raw --output data/dataset/dataset.jsonl
 ```
-out/dataset/<label>/<NN-NN>.json
-  └─ visits -> { freq_0.5, freq_0.75, freq_1.0 } ->
-       { velocity_horizontalLH, velocity_horizontalRH, velocity_horizontalAVG,
-         speed_horizontalLH, ..., gain_verticalLV, gain_verticalRV, gain_verticalAVG }
-```
+
+**Flags:**
+- `--raw-dir` — path to raw CSV accessions folder (default: `data/raw`)
+- `--output` — output `.jsonl` file path (default: `data/dataset/dataset.jsonl`)
+
+The raw CSVs are read from `data/raw/{Healthy control, Definite MG}`, and per-visit kinematics (velocity/speed/gain, baseline translation, percentile clamping, and episode micro-jumps/plateaus profiling) are written to `data/dataset/dataset.jsonl`.
 
 Smoke-test the raw reader (indexing, CSV loading, cycle detection, filtering, and figure rendering):
 
 ```bash
 python -m dataset.dataset   # run from repo root
 ```
-
-> Note: the committed generation notebooks still reference the old `exports/` tree. Point their output paths at `out/dataset` (and input at `data/raw`) before running them against the current directory layout.
 
 ### 1.5 Explore individual patient data
 
