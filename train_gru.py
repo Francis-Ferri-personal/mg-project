@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 
-from models.accession_dataset import AccessionDataset, ocular_collate_fn
+from models.accession_dataset import AccessionDataset, FeatureNormalizer, ocular_collate_fn
 from models.gru import OcularStatefulGRU
 
 SELECTED_FREQUENCY = "1.0"
@@ -171,7 +171,14 @@ def run_epoch(model, loader, optimizer, criterion, device, is_train=True):
     return total_loss / total, 100 * correct / total
 
 
-def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_size=8, out_dir=None):
+def train_with_json_splits(
+    splits_json_path,
+    base_dataset_dir,
+    epochs=40,
+    batch_size=8,
+    out_dir=None,
+    normalize_features=True,
+):
     if out_dir is None:
         out_dir = os.path.join("out", "training_results")
     os.makedirs(out_dir, exist_ok=True)
@@ -186,6 +193,7 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_print(f"Using device: {device}")
+    log_print(f"Feature z-score normalization: {'ON (fit on train only)' if normalize_features else 'OFF'}")
 
     with open(splits_json_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -200,6 +208,7 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_
         "window_size": window_size,
         "epochs": epochs,
         "batch_size": batch_size,
+        "normalize_features": normalize_features,
         "folds": []
     }
 
@@ -214,6 +223,17 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_
 
         train_dataset = AccessionDataset(train_paths, window_size=window_size, frequency_key="all")
         val_dataset = AccessionDataset(val_paths, window_size=window_size, frequency_key="all")
+
+        normalizer = None
+        if normalize_features:
+            normalizer = FeatureNormalizer().fit(train_dataset)
+            train_dataset.normalizer = normalizer
+            val_dataset.normalizer = normalizer
+            log_print(
+                f"Fitted FeatureNormalizer on {len(train_dataset)} train visits "
+                f"(mean abs={normalizer.mean.abs().mean():.4f}, "
+                f"std median={normalizer.std.median():.4f})"
+            )
 
         num_features = train_dataset[0][0].shape[1] if len(train_dataset) > 0 else 324
         log_print(f"Model input feature size: {num_features}")
@@ -243,9 +263,14 @@ def train_with_json_splits(splits_json_path, base_dataset_dir, epochs=40, batch_
 
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                # Save the model state dict to CPU to avoid CUDA dependency issues on load
+                # Save model + fold normalizer together for inference
                 model_path = os.path.join(out_dir, f"best_model_fold_{fold_idx + 1}.pt")
-                torch.save(model.state_dict(), model_path)
+                payload = {
+                    "model_state_dict": model.state_dict(),
+                    "normalizer": normalizer.state_dict() if normalizer is not None else None,
+                    "input_size": num_features,
+                }
+                torch.save(payload, model_path)
 
             log_print(f"Epoch [{epoch+1}/{epochs}] | Train Loss: {train_loss:.4f} Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f} Acc: {val_acc:.2f}%")
 
